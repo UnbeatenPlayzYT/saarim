@@ -4,63 +4,40 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.ImageSearch
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.LockClock
-import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.sarim.app.SarimAccessibilityService
 import com.sarim.app.R
-import com.sarim.app.screens.common.AppPickerDialog
+import com.sarim.app.SarimAccessibilityService
+import com.sarim.app.data.VisualBlockingSettings
 import com.sarim.app.screens.common.RecoveryGateDialog
 import com.sarim.app.screens.common.rememberRecoveryGate
-import com.sarim.app.data.VisualBlockingSettings
-import com.sarim.app.security.StrictnessLock
 import com.sarim.app.viewmodels.VisualBlockingViewModel
-import kotlinx.coroutines.delay
 
-private const val DAY_MS = 24L * 60 * 60 * 1000
-
+/**
+ * Visual blocking, shown as what it is: a layer that is always on. There is no switch — the only
+ * settings left are the ones that make it *more* effective (which extra apps to watch, how
+ * sensitive it is, how quickly a repeat offender is suspended).
+ */
 @Composable
 fun VisualBlockingScreen(viewModel: VisualBlockingViewModel = viewModel()) {
     var showAppSelectionDialog by remember { mutableStateOf(false) }
-    var showLockDialog by remember { mutableStateOf(false) }
     val recoveryGate = rememberRecoveryGate()
-    val context = LocalContext.current
-
     val sessionActive = recoveryGate.isSessionActive
     val accessibilityActive = SarimAccessibilityService.isRunning
-
-    // Recomputed on a ticker so the remaining time and the locked/unlocked state stay in step
-    // while this screen is open — the lock can run out at any moment.
-    var lockRemaining by remember { mutableLongStateOf(StrictnessLock.remainingMillis(context)) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            lockRemaining = StrictnessLock.remainingMillis(context)
-            // Second by second only matters while there is a countdown to show; an unlocked screen
-            // just needs to notice a lock started elsewhere. Starting one from here sets the state
-            // directly, so the slow tick is only a safety net.
-            delay(if (lockRemaining > 0L) 1000L else 30_000L)
-        }
-    }
-
-    val locked = lockRemaining > 0L
-    // The switch, the categories and the sensitivity are exactly what the lock exists to pin, so
-    // all of them freeze while it runs.
-    val editable = sessionActive && !locked
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
@@ -73,73 +50,21 @@ fun VisualBlockingScreen(viewModel: VisualBlockingViewModel = viewModel()) {
         }
 
         item {
-            val supporting = when {
-                locked -> stringResource(
-                    R.string.strictness_lock_remaining,
-                    ((lockRemaining + DAY_MS - 1) / DAY_MS).toInt()
-                )
-
-                StrictnessLock.hasEverLocked(context) -> stringResource(R.string.strictness_lock_ended)
-                else -> stringResource(R.string.strictness_lock_desc)
-            }
-
-            ListItem(
-                headlineContent = {
-                    Text(
-                        stringResource(
-                            if (locked) R.string.strictness_lock_locked_title
-                            else R.string.strictness_lock
-                        )
-                    )
-                },
-                supportingContent = { Text(supporting) },
-                leadingContent = {
-                    Icon(
-                        if (locked) Icons.Outlined.LockClock else Icons.Outlined.LockOpen,
-                        null
-                    )
-                },
-                trailingContent = {
-                    if (!locked) {
-                        Button(onClick = { showLockDialog = true }) {
-                            Text(stringResource(R.string.strictness_lock_start))
-                        }
-                    }
-                }
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-        }
-
-        if (!sessionActive) {
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.visual_blocking_locked)) },
-                    leadingContent = { Icon(Icons.Outlined.Lock, null) },
-                    modifier = Modifier.clickable { recoveryGate.run {} }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            }
-        }
-
-        item {
             ListItem(
                 headlineContent = { Text(stringResource(R.string.visual_blocking_enable)) },
                 supportingContent = {
-                    when {
-                        locked -> Text(stringResource(R.string.strictness_lock_pinned))
-                        !accessibilityActive -> Text(
+                    if (!accessibilityActive) {
+                        Text(
                             stringResource(R.string.visual_blocking_requires_accessibility),
                             color = MaterialTheme.colorScheme.error
                         )
+                    } else {
+                        Text(stringResource(R.string.always_on_desc))
                     }
                 },
                 leadingContent = { Icon(Icons.Outlined.ImageSearch, null) },
                 trailingContent = {
-                    Switch(
-                        checked = viewModel.enabled,
-                        enabled = editable && accessibilityActive,
-                        onCheckedChange = { viewModel.updateEnabled(it) }
-                    )
+                    Switch(checked = true, enabled = false, onCheckedChange = null)
                 }
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -149,17 +74,15 @@ fun VisualBlockingScreen(viewModel: VisualBlockingViewModel = viewModel()) {
             ListItem(
                 headlineContent = { Text(stringResource(R.string.visual_blocking_apps_section)) },
                 supportingContent = {
-                    val count = viewModel.targetPackages.size
                     Text(
-                        if (count == 0) stringResource(R.string.no_apps)
-                        else stringResource(R.string.visual_blocking_apps_selected, count)
+                        stringResource(
+                            R.string.visual_blocking_apps_selected,
+                            viewModel.targetPackages.size
+                        )
                     )
                 },
                 trailingContent = {
-                    Button(
-                        enabled = editable,
-                        onClick = { showAppSelectionDialog = true }
-                    ) {
+                    Button(onClick = { recoveryGate.run { showAppSelectionDialog = true } }) {
                         Text(stringResource(R.string.select_apps))
                     }
                 }
@@ -172,7 +95,7 @@ fun VisualBlockingScreen(viewModel: VisualBlockingViewModel = viewModel()) {
                 stringResource(R.string.visual_blocking_categories_section),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)
             )
             Text(
                 stringResource(R.string.visual_blocking_categories_desc),
@@ -185,16 +108,21 @@ fun VisualBlockingScreen(viewModel: VisualBlockingViewModel = viewModel()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = editable) { viewModel.toggleCategory(category) }
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Checkbox(
                     checked = viewModel.selectedCategories.contains(category),
-                    enabled = editable,
-                    onCheckedChange = { viewModel.toggleCategory(category) }
+                    enabled = false,
+                    onCheckedChange = null
                 )
                 Text(categoryLabel(category), modifier = Modifier.padding(start = 8.dp))
+                Spacer(Modifier.weight(1f))
+                Text(
+                    stringResource(R.string.always_on),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
 
@@ -220,9 +148,11 @@ fun VisualBlockingScreen(viewModel: VisualBlockingViewModel = viewModel()) {
             ) {
                 Slider(
                     value = viewModel.threshold,
-                    enabled = editable,
+                    enabled = sessionActive,
                     onValueChange = { viewModel.updateThreshold(it) },
-                    valueRange = 0f..1f,
+                    // The upper bound keeps the detector from being numbed into uselessness; the
+                    // lower one stops a blank wall from being flagged as adult on its own.
+                    valueRange = 0.3f..0.7f,
                     modifier = Modifier.weight(1f)
                 )
                 Text(
@@ -241,170 +171,156 @@ fun VisualBlockingScreen(viewModel: VisualBlockingViewModel = viewModel()) {
                 supportingContent = { Text(stringResource(R.string.visual_blocking_suspend_desc)) },
                 leadingContent = { Icon(Icons.Outlined.Timer, null) },
                 trailingContent = {
-                    Checkbox(
-                        checked = viewModel.suspendEnabled,
-                        enabled = sessionActive,
-                        onCheckedChange = { viewModel.updateSuspendEnabled(it) }
-                    )
-                },
-                modifier = Modifier.clickable(enabled = sessionActive) {
-                    viewModel.updateSuspendEnabled(!viewModel.suspendEnabled)
+                    Checkbox(checked = true, enabled = false, onCheckedChange = null)
                 }
             )
 
-            if (viewModel.suspendEnabled) {
-                NumberSettingField(
-                    label = stringResource(R.string.visual_blocking_suspend_count),
-                    supportingText = stringResource(R.string.visual_blocking_suspend_count_desc),
-                    value = viewModel.suspendBlockCount,
-                    enabled = sessionActive,
-                    onValueChange = { viewModel.updateSuspendBlockCount(it) }
-                )
-                NumberSettingField(
-                    label = stringResource(R.string.visual_blocking_suspend_window),
-                    supportingText = stringResource(R.string.visual_blocking_suspend_window_desc),
-                    value = viewModel.suspendWindowMinutes,
-                    enabled = sessionActive,
-                    onValueChange = { viewModel.updateSuspendWindowMinutes(it) }
-                )
-                NumberSettingField(
-                    label = stringResource(R.string.visual_blocking_suspend_duration),
-                    supportingText = stringResource(R.string.visual_blocking_suspend_duration_desc),
-                    value = viewModel.suspendDurationMinutes,
-                    enabled = sessionActive,
-                    onValueChange = { viewModel.updateSuspendDurationMinutes(it) }
-                )
-                Text(
-                    stringResource(
-                        R.string.visual_blocking_suspend_summary,
-                        viewModel.suspendBlockCount,
-                        viewModel.suspendWindowMinutes,
-                        viewModel.suspendDurationMinutes
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                )
-            }
+            NumberSettingField(
+                label = stringResource(R.string.visual_blocking_suspend_count),
+                supportingText = stringResource(R.string.visual_blocking_suspend_count_desc),
+                value = viewModel.suspendBlockCount,
+                enabled = sessionActive,
+                onValueChange = { viewModel.updateSuspendBlockCount(it) }
+            )
+            NumberSettingField(
+                label = stringResource(R.string.visual_blocking_suspend_window),
+                supportingText = stringResource(R.string.visual_blocking_suspend_window_desc),
+                value = viewModel.suspendWindowMinutes,
+                enabled = sessionActive,
+                onValueChange = { viewModel.updateSuspendWindowMinutes(it) }
+            )
+            NumberSettingField(
+                label = stringResource(R.string.visual_blocking_suspend_duration),
+                supportingText = stringResource(R.string.visual_blocking_suspend_duration_desc),
+                value = viewModel.suspendDurationMinutes,
+                enabled = sessionActive,
+                onValueChange = { viewModel.updateSuspendDurationMinutes(it) }
+            )
+            Text(
+                stringResource(
+                    R.string.visual_blocking_suspend_summary,
+                    viewModel.suspendBlockCount,
+                    viewModel.suspendWindowMinutes,
+                    viewModel.suspendDurationMinutes
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
 
             Spacer(Modifier.height(16.dp))
         }
     }
 
     if (showAppSelectionDialog) {
-        AppPickerDialog(
-            apps = viewModel.apps,
-            isLoading = viewModel.isLoadingApps,
-            isSelected = { viewModel.targetPackages.contains(it) },
-            onToggle = { viewModel.toggleAppSelection(it) },
+        MonitoredAppsDialog(
+            viewModel = viewModel,
             onDismiss = { showAppSelectionDialog = false }
-        )
-    }
-
-    if (showLockDialog) {
-        StrictnessLockDialog(
-            hasTargetApps = viewModel.targetPackages.isNotEmpty(),
-            accessibilityActive = accessibilityActive,
-            onStart = { days ->
-                StrictnessLock.start(context, days)
-                StrictnessLock.enforce(context)
-                lockRemaining = StrictnessLock.remainingMillis(context)
-                showLockDialog = false
-            },
-            onDismiss = { showLockDialog = false }
         )
     }
 
     RecoveryGateDialog(recoveryGate)
 }
 
-/**
- * Duration picker + a plain description of what starting the lock does. Nothing here is gated by
- * the recovery code: the lock only ever makes the app stricter, and the confirmation text is what
- * makes it a deliberate act.
- */
+/** App picker for the monitored list: the built-in defaults are shown but can't be deselected. */
 @Composable
-private fun StrictnessLockDialog(
-    hasTargetApps: Boolean,
-    accessibilityActive: Boolean,
-    onStart: (Int) -> Unit,
+private fun MonitoredAppsDialog(
+    viewModel: VisualBlockingViewModel,
     onDismiss: () -> Unit
 ) {
-    var daysText by remember { mutableStateOf(StrictnessLock.DEFAULT_DURATION_DAYS.toString()) }
-    val days = daysText.toIntOrNull() ?: 0
-    val validDuration = days >= StrictnessLock.MIN_DURATION_DAYS
+    var searchQuery by remember { mutableStateOf("") }
+    var showSystemApps by remember { mutableStateOf(false) }
 
-    // Locking in a block that cannot do anything would only trap the user who set it: with no
-    // monitored app, or with accessibility off, visual blocking detects nothing at all.
-    val blocker = when {
-        !accessibilityActive -> R.string.visual_blocking_requires_accessibility
-        !hasTargetApps -> R.string.strictness_lock_requires_apps
-        else -> null
+    val filteredApps = remember(searchQuery, viewModel.apps, showSystemApps) {
+        viewModel.apps
+            .filter {
+                (showSystemApps || !it.isSystem) &&
+                    (it.name.contains(searchQuery, ignoreCase = true) ||
+                        it.packageName.contains(searchQuery, ignoreCase = true))
+            }
+            .sortedBy { it.name.lowercase() }
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Outlined.LockClock, null) },
-        title = { Text(stringResource(R.string.strictness_lock_duration_title)) },
+        title = { Text(stringResource(R.string.visual_blocking_apps_section)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    stringResource(
-                        R.string.strictness_lock_duration_text,
-                        StrictnessLock.MIN_DURATION_DAYS
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(vertical = 8.dp),
+                        placeholder = { Text(stringResource(R.string.search_apps)) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        singleLine = true
                     )
-                )
-                Text(stringResource(R.string.strictness_lock_what_changes))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StrictnessLock.DURATION_PRESETS_DAYS.forEach { preset ->
-                        FilterChip(
-                            selected = days == preset,
-                            onClick = { daysText = preset.toString() },
-                            label = { Text(preset.toString()) }
-                        )
-                    }
+                    FilterChip(
+                        selected = showSystemApps,
+                        onClick = { showSystemApps = !showSystemApps },
+                        label = { Text(stringResource(R.string.show_system_apps)) },
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
                 }
-                OutlinedTextField(
-                    value = daysText,
-                    onValueChange = { input ->
-                        if (input.all { it.isDigit() } && input.length <= 5) daysText = input
-                    },
-                    label = { Text(stringResource(R.string.strictness_lock_days_label)) },
-                    isError = !validDuration,
-                    supportingText = {
-                        Text(
-                            stringResource(
-                                R.string.strictness_lock_days_invalid,
-                                StrictnessLock.MIN_DURATION_DAYS
-                            )
-                        )
-                    },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true
-                )
-                if (blocker != null) {
-                    Text(
-                        stringResource(blocker),
-                        color = MaterialTheme.colorScheme.error
-                    )
+
+                if (viewModel.isLoadingApps) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                        items(filteredApps) { app ->
+                            val mandatory =
+                                app.packageName in VisualBlockingSettings.DEFAULT_TARGET_PACKAGES
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !mandatory) {
+                                        viewModel.toggleAppSelection(app.packageName)
+                                    }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = viewModel.targetPackages.contains(app.packageName),
+                                    enabled = !mandatory,
+                                    onCheckedChange = { viewModel.toggleAppSelection(app.packageName) }
+                                )
+                                Column(modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = 12.dp)) {
+                                    Text(app.name, fontWeight = FontWeight.Bold)
+                                    Text(app.packageName, style = MaterialTheme.typography.bodySmall)
+                                }
+                                if (mandatory) {
+                                    Text(
+                                        stringResource(R.string.always_on),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },
         confirmButton = {
-            Button(
-                enabled = validDuration && blocker == null,
-                onClick = { onStart(days) }
-            ) {
-                Text(stringResource(R.string.strictness_lock_start_confirm))
+            Button(onClick = onDismiss) {
+                Text(stringResource(R.string.confirm))
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
         }
     )
 }
 
 /**
- * Label + numeric text field row used by the "suspend app" settings. The field is allowed to go
+ * Label + numeric text field row used by the suspension settings. The field is allowed to go
  * empty while the user retypes a number — [onValueChange] then reports 0, which the view model
  * treats as "not a usable value yet" and doesn't persist.
  */
@@ -416,7 +332,7 @@ private fun NumberSettingField(
     enabled: Boolean,
     onValueChange: (Int) -> Unit
 ) {
-    var textFieldValue by remember { mutableStateOf(value.toString()) }
+    var textFieldValue by remember(value) { mutableStateOf(value.toString()) }
 
     Row(
         modifier = Modifier
@@ -455,4 +371,3 @@ private fun categoryLabel(category: String): String = when (category) {
     "sexy" -> stringResource(R.string.nsfw_category_sexy)
     else -> category
 }
-

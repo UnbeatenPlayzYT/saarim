@@ -16,10 +16,7 @@ import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.LockClock
 import androidx.compose.material.icons.outlined.NoAdultContent
-import androidx.compose.material.icons.outlined.NotificationsActive
-import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Security
-import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.VpnKey
 import androidx.compose.material.icons.outlined.Web
 import androidx.compose.material3.*
@@ -32,24 +29,25 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.sarim.app.SarimAccessibilityService
 import com.sarim.app.R
+import com.sarim.app.SarimAccessibilityService
+import com.sarim.app.data.ProtectionDefaults
 import com.sarim.app.screens.common.OnboardingCarousel
 import com.sarim.app.screens.common.RecoveryGateDialog
 import com.sarim.app.screens.common.RecoveryGenerateDialog
 import com.sarim.app.screens.common.rememberRecoveryGate
+import com.sarim.app.security.CommitmentLock
 import com.sarim.app.security.SecurityManager
-import com.sarim.app.security.StrictnessLock
 import com.sarim.app.utils.LocaleUtils
 import com.sarim.app.viewmodels.DeviceOwnerViewModel
 import com.sarim.app.viewmodels.NavigationViewModel
 import kotlinx.coroutines.CoroutineScope
-import rikka.shizuku.Shizuku
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import rikka.shizuku.Shizuku
 import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
@@ -64,11 +62,11 @@ fun ConfigTab(
     var showKeyboardDialog by remember { mutableStateOf(false) }
     var showRecoveryDialog by remember { mutableStateOf(false) }
     var showHowItWorks by remember { mutableStateOf(false) }
-    val recoveryGate = rememberRecoveryGate()
     var showStartForcedRemovalDialog by remember { mutableStateOf(false) }
     var showCancelForcedRemovalDialog by remember { mutableStateOf(false) }
     var showFinishForcedRemovalDialog by remember { mutableStateOf(false) }
     var confirmForcedRemoval by remember { mutableStateOf(false) }
+    val recoveryGate = rememberRecoveryGate()
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -78,25 +76,35 @@ fun ConfigTab(
     val advancedBlockingRequiredMsg = stringResource(R.string.advanced_blocking_required)
 
     var shuffleKeyboard by remember { mutableStateOf(SecurityManager.isShuffleKeyboardEnabled(context)) }
-    var blockTorrents by remember { mutableStateOf(SecurityManager.isBlockTorrentsEnabled(context)) }
-    var blockTor by remember { mutableStateOf(SecurityManager.isBlockTorEnabled(context)) }
-
-    // While the strictness lock runs, the Tor block is pinned on and the service re-asserts it, so
-    // the switch is shown as fixed rather than letting the user flip it and watch it snap back.
-    val strictnessLocked = remember { StrictnessLock.isLocked(context) }
-
     val advancedBlocking = SarimAccessibilityService.isRunning
 
-    var forcedRemovalRemaining by remember { mutableLongStateOf(SecurityManager.getForcedRemovalRemainingTime(context)) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            forcedRemovalRemaining = SecurityManager.getForcedRemovalRemainingTime(context)
-            kotlinx.coroutines.delay(60000.milliseconds)
-        }
+    val forcedRemovalRemaining by remember {
+        mutableLongStateOf(SecurityManager.getForcedRemovalRemainingTime(context))
     }
+    val permanent = CommitmentLock.isPermanent(context)
+    val commitmentRemaining = CommitmentLock.remainingMillis(context)
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(modifier = Modifier.fillMaxSize()) {
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.commitment_active_title)) },
+                    supportingContent = {
+                        Text(
+                            when {
+                                permanent -> stringResource(R.string.commitment_remaining_permanent)
+                                commitmentRemaining > 0L -> stringResource(
+                                    R.string.commitment_remaining_days,
+                                    (commitmentRemaining / (24L * 60L * 60L * 1000L)).toInt()
+                                )
+                                else -> stringResource(R.string.commitment_ended)
+                            }
+                        )
+                    },
+                    leadingContent = { Icon(Icons.Outlined.Security, "") }
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            }
             item {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.device_owner_state)) },
@@ -116,20 +124,52 @@ fun ConfigTab(
             }
             item {
                 ListItem(
-                    headlineContent = { Text(stringResource(R.string.dns_settings)) },
-                    supportingContent = { 
-                        Text( stringResource(R.string.dns_description))
-                    },
-                    leadingContent = { Icon(Icons.Outlined.Dns, "") },
-                    modifier = Modifier.clickable {
-                        if (!viewModel.isDeviceOwner()) {
-                            scope.launch {
-                                snackbarHostState.showSnackbar(ownerPrivilegesFirstMsg)
+                    headlineContent = { Text(stringResource(R.string.advanced_blocking)) },
+                    supportingContent = { Text(stringResource(R.string.activity_blocker_description)) },
+                    leadingContent = { Icon(Icons.Outlined.Accessibility, "") },
+                    trailingContent = {
+                        Switch(advancedBlocking, onCheckedChange = { checked ->
+                            if (!Shizuku.pingBinder()) {
+                                scope.launch { snackbarHostState.showSnackbar(shizukuNotRunningMsg) }
+                                return@Switch
                             }
+                            // Turning it back on only adds protection, so a running commitment
+                            // lets it through; turning it off does not.
+                            recoveryGate.run(strengtheningAction = checked) {
+                                if (!checked) SarimAccessibilityService.prepareServiceDisable()
+                                viewModel.changeAccessibilityPermission(checked)
+                            }
+                        })
+                    }
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.visual_blocking)) },
+                    supportingContent = { Text(stringResource(R.string.always_on_desc)) },
+                    leadingContent = { Icon(Icons.Outlined.ImageSearch, "") },
+                    modifier = Modifier.clickable {
+                        if (!advancedBlocking) {
+                            scope.launch { snackbarHostState.showSnackbar(advancedBlockingRequiredMsg) }
                             return@clickable
                         }
-                        dnsErrorRes = null
-                        showDnsDialog = true
+                        navViewModel.navigateTo("visual_blocking")
+                    }
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.blocked_words_feat)) },
+                    supportingContent = { Text(stringResource(R.string.blocked_words_feat_description)) },
+                    leadingContent = { Icon(Icons.Outlined.NoAdultContent, "") },
+                    modifier = Modifier.clickable {
+                        if (!advancedBlocking) {
+                            scope.launch { snackbarHostState.showSnackbar(advancedBlockingRequiredMsg) }
+                            return@clickable
+                        }
+                        navViewModel.navigateTo("blocked_words")
                     }
                 )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -145,125 +185,44 @@ fun ConfigTab(
             }
             item {
                 ListItem(
-                    headlineContent = { Text(stringResource(R.string.activity_blocker)) },
-                    supportingContent = { Text(stringResource(R.string.activity_blocker_description)) },
-                    leadingContent = { Icon(Icons.Outlined.Accessibility, "") },
-                    trailingContent = {
-                        Switch(advancedBlocking, onCheckedChange = { checked ->
-                            if (!Shizuku.pingBinder()) {
-                                scope.launch {
-                                    snackbarHostState.showSnackbar(shizukuNotRunningMsg)
-                                }
-                                return@Switch
-                            }
-                            recoveryGate.run {
-                                SarimAccessibilityService.prepareServiceDisable()
-                                viewModel.changeAccessibilityPermission(checked)
-                            }
-                        })
+                    headlineContent = { Text(stringResource(R.string.dns_settings)) },
+                    supportingContent = { Text(stringResource(R.string.dns_description)) },
+                    leadingContent = { Icon(Icons.Outlined.Dns, "") },
+                    modifier = Modifier.clickable {
+                        if (!viewModel.isDeviceOwner()) {
+                            scope.launch { snackbarHostState.showSnackbar(ownerPrivilegesFirstMsg) }
+                            return@clickable
+                        }
+                        dnsErrorRes = null
+                        showDnsDialog = true
                     }
                 )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
             item {
                 ListItem(
-                    headlineContent = { Text(stringResource(R.string.blocked_activities)) },
-                    supportingContent = { Text(stringResource(R.string.blocked_activities_desc)) },
+                    headlineContent = { Text(stringResource(R.string.system_restrictions)) },
+                    supportingContent = { Text(stringResource(R.string.always_on_desc)) },
                     leadingContent = { Icon(Icons.Outlined.Block, "") },
-                    modifier = Modifier.clickable {
-                        if (!advancedBlocking) {
-                            scope.launch {
-                                snackbarHostState.showSnackbar(advancedBlockingRequiredMsg)
-                            }
-                            return@clickable
-                        }
-                        navViewModel.navigateTo("activity_blocker")
-                    }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.visual_blocking)) },
-                    supportingContent = { Text(stringResource(R.string.visual_blocking_desc)) },
-                    leadingContent = { Icon(Icons.Outlined.ImageSearch, "") },
-                    modifier = Modifier.clickable {
-                        if (!advancedBlocking) {
-                            scope.launch {
-                                snackbarHostState.showSnackbar(advancedBlockingRequiredMsg)
-                            }
-                            return@clickable
-                        }
-                        navViewModel.navigateTo("visual_blocking")
-                    }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.blocked_words_feat)) },
-                    supportingContent = { Text(stringResource(R.string.blocked_words_feat_description)) },
-                    leadingContent = { Icon(Icons.Outlined.NoAdultContent, "") },
-                    modifier = Modifier.clickable {
-                        if (!advancedBlocking) {
-                            scope.launch {
-                                snackbarHostState.showSnackbar(advancedBlockingRequiredMsg)
-                            }
-                            return@clickable
-                        }
-                        navViewModel.navigateTo("blocked_words")
-                    }
+                    modifier = Modifier.clickable { navViewModel.navigateTo("system_restrictions") }
                 )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
             item {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.block_torrents)) },
-                    supportingContent = { Text(stringResource(R.string.block_torrents_desc)) },
+                    supportingContent = { Text(stringResource(R.string.always_on_desc)) },
                     leadingContent = { Icon(Icons.Outlined.FileDownload, "") },
-                    trailingContent = {
-                        Switch(blockTorrents, onCheckedChange = { checked ->
-                            if (checked && !advancedBlocking) {
-                                scope.launch {
-                                    snackbarHostState.showSnackbar(advancedBlockingRequiredMsg)
-                                }
-                                return@Switch
-                            }
-                            recoveryGate.run {
-                                blockTorrents = checked
-                                SecurityManager.setBlockTorrentsEnabled(context, checked)
-                            }
-                        })
-                    }
+                    trailingContent = { Switch(checked = true, enabled = false, onCheckedChange = null) }
                 )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
             item {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.block_tor)) },
-                    supportingContent = {
-                        Text(
-                            stringResource(
-                                if (strictnessLocked) R.string.strictness_lock_pinned
-                                else R.string.block_tor_desc
-                            )
-                        )
-                    },
+                    supportingContent = { Text(stringResource(R.string.always_on_desc)) },
                     leadingContent = { Icon(Icons.Outlined.Security, "") },
-                    trailingContent = {
-                        Switch(blockTor, enabled = !strictnessLocked, onCheckedChange = { checked ->
-                            if (checked && !advancedBlocking) {
-                                scope.launch {
-                                    snackbarHostState.showSnackbar(advancedBlockingRequiredMsg)
-                                }
-                                return@Switch
-                            }
-                            recoveryGate.run {
-                                blockTor = checked
-                                SecurityManager.setBlockTorEnabled(context, checked)
-                            }
-                        })
-                    }
+                    trailingContent = { Switch(checked = true, enabled = false, onCheckedChange = null) }
                 )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
@@ -286,46 +245,8 @@ fun ConfigTab(
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
             item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.impulse_lock)) },
-                    supportingContent = { Text(stringResource(R.string.impulse_lock_desc)) },
-                    leadingContent = { Icon(Icons.Outlined.LockClock, "") },
-                    modifier = Modifier.clickable { navViewModel.navigateTo("impulse_lock") }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.focus_mode)) },
-                    supportingContent = { Text(stringResource(R.string.focus_mode_desc)) },
-                    leadingContent = { Icon(Icons.Outlined.Timer, "") },
-                    modifier = Modifier.clickable { navViewModel.navigateTo("focus_mode") }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.usage_warning_settings)) },
-                    supportingContent = { Text(stringResource(R.string.usage_warning_settings_desc)) },
-                    leadingContent = { Icon(Icons.Outlined.NotificationsActive, "") },
-                    modifier = Modifier.clickable { navViewModel.navigateTo("usage_warning") }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.color_filter_settings)) },
-                    supportingContent = { Text(stringResource(R.string.color_filter_settings_desc)) },
-                    leadingContent = { Icon(Icons.Outlined.Palette, "") },
-                    modifier = Modifier.clickable { navViewModel.navigateTo("color_filters") }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            }
-            item {
                 val keyboardLabel = if (shuffleKeyboard)
-                    stringResource(R.string.keyboard_shuffle)
-                else
-                    stringResource(R.string.keyboard_normal)
+                    stringResource(R.string.keyboard_shuffle) else stringResource(R.string.keyboard_normal)
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.keyboard_type)) },
                     supportingContent = { Text(keyboardLabel) },
@@ -337,36 +258,61 @@ fun ConfigTab(
             item {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.change_recovery_code)) },
-                    leadingContent = { Icon(Icons.Outlined.VpnKey, "") },
                     supportingContent = { Text(stringResource(R.string.change_recovery_code_desc)) },
-                    modifier = Modifier.clickable {
-                        recoveryGate.run { showRecoveryDialog = true }
-                    }
+                    leadingContent = { Icon(Icons.Outlined.VpnKey, "") },
+                    modifier = Modifier.clickable { recoveryGate.run { showRecoveryDialog = true } }
                 )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
-            item {
-                val forcedRemovalText = if (forcedRemovalRemaining > 0) {
-                    val hours = (forcedRemovalRemaining / (1000 * 60 * 60)).toInt()
-                    val minutes = ((forcedRemovalRemaining / (1000 * 60)) % 60).toInt()
-                    if (hours > 0) stringResource(R.string.time_hours_minutes, hours, minutes)
-                    else stringResource(R.string.time_minutes, minutes)
-                } else if (forcedRemovalRemaining == 0L) {
-                    stringResource(R.string.active)
-                } else null
 
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.forced_removal)) },
-                    supportingContent = { Text(stringResource(R.string.forced_removal_desc)) },
-                    leadingContent = { Icon(Icons.Outlined.LockClock, "") },
-                    trailingContent = forcedRemovalText?.let { { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary) } },
-                    modifier = Modifier.clickable {
-                        if (forcedRemovalRemaining < 0) showStartForcedRemovalDialog = true
-                        else if (forcedRemovalRemaining == 0L) showFinishForcedRemovalDialog = true
-                        else showCancelForcedRemovalDialog = true
+            // A permanent commitment deliberately has no way out, so the escape hatch isn't even
+            // listed for one.
+            if (!permanent) {
+                item {
+                    val forcedRemovalText = when {
+                        forcedRemovalRemaining > 0 -> {
+                            val hours = (forcedRemovalRemaining / (1000 * 60 * 60)).toInt()
+                            val minutes = ((forcedRemovalRemaining / (1000 * 60)) % 60).toInt()
+                            if (hours > 0) stringResource(R.string.time_hours_minutes, hours, minutes)
+                            else stringResource(R.string.time_minutes, minutes)
+                        }
+                        forcedRemovalRemaining == 0L -> stringResource(R.string.active)
+                        else -> null
                     }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.forced_removal)) },
+                        supportingContent = { Text(stringResource(R.string.forced_removal_desc)) },
+                        leadingContent = { Icon(Icons.Outlined.LockClock, "") },
+                        trailingContent = forcedRemovalText?.let {
+                            {
+                                Text(
+                                    it,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        },
+                        modifier = Modifier.clickable {
+                            when {
+                                forcedRemovalRemaining < 0 -> showStartForcedRemovalDialog = true
+                                forcedRemovalRemaining == 0L -> showFinishForcedRemovalDialog = true
+                                else -> showCancelForcedRemovalDialog = true
+                            }
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                }
+            } else {
+                item {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.forced_removal)) },
+                        supportingContent = { Text(stringResource(R.string.commitment_forced_removal_disabled)) },
+                        leadingContent = { Icon(Icons.Outlined.LockClock, "") },
+                        trailingContent = { Switch(checked = false, enabled = false, onCheckedChange = null) }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                }
             }
         }
         SnackbarHost(
@@ -379,22 +325,16 @@ fun ConfigTab(
         AlertDialog(
             onDismissRequest = { showStartForcedRemovalDialog = false },
             title = { Text(stringResource(R.string.forced_removal_dialog_title)) },
-            text = {
-                Column {
-                    Text(stringResource(R.string.forced_removal_dialog_text))
-                }
-            },
+            text = { Text(stringResource(R.string.forced_removal_dialog_text)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         SecurityManager.startForcedRemoval(context)
-                        forcedRemovalRemaining = SecurityManager.getForcedRemovalRemainingTime(context)
                         showStartForcedRemovalDialog = false
                         confirmForcedRemoval = false
+                        (context as? android.app.Activity)?.recreate()
                     }
-                ) {
-                    Text(stringResource(R.string.confirm))
-                }
+                ) { Text(stringResource(R.string.confirm)) }
             },
             dismissButton = {
                 TextButton(onClick = { showStartForcedRemovalDialog = false; confirmForcedRemoval = false }) {
@@ -412,11 +352,9 @@ fun ConfigTab(
             confirmButton = {
                 TextButton(onClick = {
                     SecurityManager.cancelForcedRemoval(context)
-                    forcedRemovalRemaining = -1L
                     showCancelForcedRemovalDialog = false
-                }) {
-                    Text(stringResource(R.string.confirm))
-                }
+                    (context as? android.app.Activity)?.recreate()
+                }) { Text(stringResource(R.string.confirm)) }
             },
             dismissButton = {
                 TextButton(onClick = { showCancelForcedRemovalDialog = false }) {
@@ -428,7 +366,7 @@ fun ConfigTab(
 
     if (showFinishForcedRemovalDialog) {
         AlertDialog(
-            onDismissRequest = { 
+            onDismissRequest = {
                 showFinishForcedRemovalDialog = false
                 confirmForcedRemoval = false
             },
@@ -444,7 +382,10 @@ fun ConfigTab(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(checked = confirmForcedRemoval, onCheckedChange = { confirmForcedRemoval = it })
-                        Text(stringResource(R.string.forced_removal_confirm_checkbox), modifier = Modifier.padding(start = 8.dp))
+                        Text(
+                            stringResource(R.string.forced_removal_confirm_checkbox),
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
                     }
                 }
             },
@@ -457,19 +398,15 @@ fun ConfigTab(
                         confirmForcedRemoval = false
                         (context as? android.app.Activity)?.recreate()
                     }
-                ) {
-                    Text(stringResource(R.string.confirm))
-                }
+                ) { Text(stringResource(R.string.confirm)) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     SecurityManager.cancelForcedRemoval(context)
-                    forcedRemovalRemaining = -1L
                     showFinishForcedRemovalDialog = false
                     confirmForcedRemoval = false
-                }) {
-                    Text(stringResource(R.string.cancel))
-                }
+                    (context as? android.app.Activity)?.recreate()
+                }) { Text(stringResource(R.string.cancel)) }
             }
         )
     }
@@ -489,17 +426,15 @@ fun ConfigTab(
                     isApplyingDns = true
                     scope.launch {
                         val result = withTimeoutOrNull(15000.milliseconds) {
-                            val deferred = externalScope.async {
-                                viewModel.setPrivateDNS(host)
-                            }
-                            deferred.await()
+                            externalScope.async { viewModel.setPrivateDNS(host) }.await()
                         }
                         isApplyingDns = false
                         if (result == DevicePolicyManager.PRIVATE_DNS_SET_NO_ERROR) {
                             showDnsDialog = false
                         } else {
                             dnsErrorRes = when (result) {
-                                DevicePolicyManager.PRIVATE_DNS_SET_ERROR_HOST_NOT_SERVING -> R.string.dns_error_not_serving
+                                DevicePolicyManager.PRIVATE_DNS_SET_ERROR_HOST_NOT_SERVING ->
+                                    R.string.dns_error_not_serving
                                 else -> R.string.dns_error_failure
                             }
                         }
@@ -524,11 +459,9 @@ fun ConfigTab(
             currentShuffle = shuffleKeyboard,
             onDismiss = { showKeyboardDialog = false },
             onApply = { isShuffle ->
-                recoveryGate.run {
-                    shuffleKeyboard = isShuffle
-                    SecurityManager.setShuffleKeyboardEnabled(context, isShuffle)
-                    showKeyboardDialog = false
-                }
+                shuffleKeyboard = isShuffle
+                SecurityManager.setShuffleKeyboardEnabled(context, isShuffle)
+                showKeyboardDialog = false
             }
         )
     }
@@ -550,6 +483,12 @@ fun ConfigTab(
     RecoveryGateDialog(recoveryGate)
 }
 
+/**
+ * The private-DNS picker, limited to family/adult-filtering resolvers. There is deliberately no
+ * "automatic", no "off" and no free-text host: each of those is a way to point the device at a
+ * resolver that ignores the filtering, and the device-owner restriction already forbids changing
+ * it from Android's own settings.
+ */
 @Composable
 fun DnsSelectionDialog(
     currentDns: String?,
@@ -558,25 +497,11 @@ fun DnsSelectionDialog(
     onDismiss: () -> Unit,
     onApply: (String) -> Unit
 ) {
-    val options = listOf(
-        "Cloudflare" to "family.cloudflare-dns.com",
-        "AdGuard DNS" to "family.adguard-dns.com",
-        "CleanBrowsing" to "adult-filter-dns.cleanbrowsing.org"
-    )
-    
-    var selectedOption by remember { 
+    var selectedHost by remember {
         mutableStateOf(
-            when {
-                options.any { it.second == currentDns } -> currentDns
-                currentDns != null -> "custom"
-                else -> null
-            }
+            currentDns?.takeIf { it in ProtectionDefaults.FILTERING_DNS_HOSTS }
+                ?: ProtectionDefaults.FILTERING_DNS_HOST
         )
-    }
-    var customHost by remember { mutableStateOf(if (selectedOption == "custom") currentDns ?: "" else "") }
-
-    val isCustomValid = remember(customHost) {
-        customHost.matches(Regex("^([a-z0-9]+(-[a-z0-9]+)*\\.)+[a-z]{2,}\$"))
     }
 
     AlertDialog(
@@ -584,56 +509,27 @@ fun DnsSelectionDialog(
         title = { Text(stringResource(R.string.dns_settings)) },
         text = {
             Column {
-                options.forEach { (name, host) ->
+                ProtectionDefaults.FILTERING_DNS_HOSTS.forEach { host ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = !isLoading) { selectedOption = host }
+                            .clickable(enabled = !isLoading) { selectedHost = host }
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
-                            selected = selectedOption == host,
-                            onClick = { selectedOption = host },
+                            selected = selectedHost == host,
+                            onClick = { selectedHost = host },
                             enabled = !isLoading
                         )
                         Column(Modifier.padding(start = 8.dp)) {
-                            Text(name, fontWeight = FontWeight.Bold)
+                            Text(
+                                ProtectionDefaults.FILTERING_DNS_LABELS[host] ?: host,
+                                fontWeight = FontWeight.Bold
+                            )
                             Text(host, style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(enabled = !isLoading) { selectedOption = "custom" }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = selectedOption == "custom",
-                        onClick = { selectedOption = "custom" },
-                        enabled = !isLoading
-                    )
-                    Text(stringResource(R.string.custom), fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp))
-                }
-                if (selectedOption == "custom") {
-                    OutlinedTextField(
-                        value = customHost,
-                        onValueChange = { customHost = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        placeholder = { Text(stringResource(R.string.dns_host_hint)) },
-                        singleLine = true,
-                        enabled = !isLoading,
-                        isError = !isCustomValid && customHost.isNotEmpty(),
-                        supportingText = {
-                            if (!isCustomValid && customHost.isNotEmpty()) {
-                                Text(stringResource(R.string.invalid_dns_host))
-                            }
-                        }
-                    )
                 }
                 if (errorRes != null) {
                     Text(
@@ -646,16 +542,9 @@ fun DnsSelectionDialog(
             }
         },
         confirmButton = {
-            val canApply = selectedOption != null && (selectedOption != "custom" || isCustomValid) && !isLoading
             TextButton(
-                enabled = canApply,
-                onClick = { 
-                    val finalHost = when(selectedOption) {
-                        "custom" -> customHost
-                        else -> selectedOption
-                    }
-                    onApply(finalHost!!)
-                }
+                enabled = !isLoading,
+                onClick = { onApply(selectedHost) }
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -712,15 +601,13 @@ fun LanguageSelectionDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { onApply(selectedOption) }
-            ) {
+            TextButton(onClick = { onApply(selectedOption) }) {
                 Text(stringResource(R.string.apply))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.cancel))
+                Text(stringResource(R.string.close))
             }
         }
     )
@@ -732,59 +619,45 @@ fun KeyboardTypeDialog(
     onDismiss: () -> Unit,
     onApply: (Boolean) -> Unit
 ) {
-    var selectedShuffle by remember { mutableStateOf(currentShuffle) }
+    var shuffle by remember { mutableStateOf(currentShuffle) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.keyboard_type)) },
         text = {
             Column {
+                Text(stringResource(R.string.keyboard_description))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { selectedShuffle = false }
-                        .padding(vertical = 4.dp),
+                        .clickable { shuffle = false }
+                        .padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    RadioButton(selected = !selectedShuffle, onClick = { selectedShuffle = false })
-                    Column(Modifier.padding(start = 8.dp)) {
-                        Text(stringResource(R.string.keyboard_normal), fontWeight = FontWeight.Bold)
-                        Text(
-                            stringResource(R.string.keyboard_normal_desc),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                    RadioButton(selected = !shuffle, onClick = { shuffle = false })
+                    Text(stringResource(R.string.keyboard_normal), modifier = Modifier.padding(start = 8.dp))
                 }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { selectedShuffle = true }
-                        .padding(vertical = 4.dp),
+                        .clickable { shuffle = true }
+                        .padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    RadioButton(selected = selectedShuffle, onClick = { selectedShuffle = true })
-                    Column(Modifier.padding(start = 8.dp)) {
-                        Text(stringResource(R.string.keyboard_shuffle), fontWeight = FontWeight.Bold)
-                        Text(
-                            stringResource(R.string.keyboard_shuffle_desc),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                    RadioButton(selected = shuffle, onClick = { shuffle = true })
+                    Text(stringResource(R.string.keyboard_shuffle), modifier = Modifier.padding(start = 8.dp))
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                onApply(selectedShuffle) }) {
+            TextButton(onClick = { onApply(shuffle) }) {
                 Text(stringResource(R.string.apply))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.cancel))
+                Text(stringResource(R.string.close))
             }
         }
     )
 }
-
-

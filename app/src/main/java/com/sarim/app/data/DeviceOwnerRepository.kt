@@ -124,7 +124,6 @@ object DeviceOwnerRepository {
         }
 
         val granted = dpm.isDeviceOwnerApp(packageName)
-        if (granted) ColorFilterController.grantPermissionViaShizuku(context)
         adminPrefs.edit {
             putBoolean("admin_result_received", true)
             putBoolean("admin_enabled", granted)
@@ -321,6 +320,5 @@ object DeviceOwnerRepository {
                 }
             })
 
-        if (grant) ColorFilterController.grantPermissionViaShizuku(context)
     }
 }

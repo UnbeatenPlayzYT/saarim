@@ -191,26 +191,35 @@ class BrowserRestrictionsManager(private val context: Context) {
         }
     }
 
-    fun applyRestrictions(installed: Boolean = false) {
+    /**
+     * Pushes the blocked hosts and forced SafeSearch into every installed browser that supports
+     * managed restrictions.
+     *
+     * The built-in adult sites are unioned in on every call, so a missing or edited preference
+     * can never shrink the list — that is what the `installed` parameter used to gate, and there
+     * is no longer a path that applies one without the other.
+     */
+    fun applyRestrictions() {
         val prefs = context.getSharedPreferences("browser_prefs", Context.MODE_PRIVATE)
-        val json = prefs.getString("blocked_lists_json", null) ?: return
+        val json = prefs.getString("blocked_lists_json", null)
 
-        val allSites = mutableSetOf<String>()
+        val allSites = mutableSetOf<String>().apply { addAll(ProtectionDefaults.ADULT_SITES) }
         try {
-            val array = JSONArray(json)
-            for (i in 0 until array.length()) {
-                val sitesArray = array.getJSONObject(i).getJSONArray("sites")
-                for (j in 0 until sitesArray.length()) {
-                    allSites.add(sitesArray.getString(j))
+            if (json != null) {
+                val array = JSONArray(json)
+                for (i in 0 until array.length()) {
+                    val sitesArray = array.getJSONObject(i).getJSONArray("sites")
+                    for (j in 0 until sitesArray.length()) {
+                        val site = sitesArray.getString(j).trim()
+                        if (site.isNotEmpty()) allSites.add(site)
+                    }
                 }
             }
         } catch (e: Exception) { e.printStackTrace() }
 
         val urlRestrictions = Bundle().apply {
             putStringArray("URLBlocklist", allSites.toTypedArray())
-
-            if (installed)
-                putBoolean("ForceGoogleSafeSearch", true)
+            putBoolean("ForceGoogleSafeSearch", true)
         }
 
         getPossibleBrowsers().forEach { info ->

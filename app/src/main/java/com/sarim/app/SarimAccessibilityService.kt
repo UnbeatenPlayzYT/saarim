@@ -10,7 +10,6 @@ import android.content.Intent
 import android.content.Intent.FLAG_ACTIVITY_NEW_TASK
 import android.content.IntentFilter
 import android.content.SharedPreferences
-import android.database.ContentObserver
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Build
@@ -22,42 +21,21 @@ import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import java.time.LocalDate
-import java.time.LocalTime
-import java.util.concurrent.TimeUnit
 import androidx.core.content.edit
 import com.sarim.app.activities.AccessibilityRequestActivity
 import com.sarim.app.activities.BlockedWordActivity
 import com.sarim.app.activities.NsfwContentBlockedActivity
-import com.sarim.app.activities.OutsideTimeWindowActivity
-import com.sarim.app.activities.ReopeningLimitActivity
-import com.sarim.app.activities.TimeUpActivity
 import com.sarim.app.data.ApkUpdateInstaller
-import com.sarim.app.data.AppGroupRepository
 import com.sarim.app.data.AppRepository
-import com.sarim.app.data.AppTimeLimits
-import com.sarim.app.data.AppTimeWindows
 import com.sarim.app.data.BrowserRestrictionsManager
-import com.sarim.app.data.ColorFilterController
-import com.sarim.app.data.ColorFilterSettings
-import com.sarim.app.data.FocusMode
 import com.sarim.app.data.PlayStoreRatingFetcher
-import com.sarim.app.data.UsageWarningSettings
 import com.sarim.app.data.VisualBlockingSettings
 import com.sarim.app.data.VisualBlockingSuspensionTracker
-import com.sarim.app.models.AppGroup
-import com.sarim.app.models.ColorFilterMode
-import com.sarim.app.models.TimeWindow
-import com.sarim.app.models.UsageAlertStage
-import com.sarim.app.notifications.FocusService
-import com.sarim.app.notifications.UsageWarningNotifier
+import com.sarim.app.security.CommitmentLock
 import com.sarim.app.security.SecurityManager
-import com.sarim.app.security.StrictnessLock
-import com.sarim.app.utils.HomeScreenDetector
-import com.sarim.app.utils.NightLightOverlay
+import com.sarim.app.security.MandatoryProtection
 import com.sarim.app.utils.NsfwContentDetector
 import org.jsoup.HttpStatusException
 import kotlinx.coroutines.CoroutineScope
@@ -68,35 +46,25 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.util.concurrent.Executors
-import kotlin.math.max
 
+/**
+ * The enforcement engine: forbidden words as they are typed or shown, adult images and video on
+ * screen, Tor/Orbot and torrent clients, apps the store rates 18+, and every browser that gains a
+ * managed-restrictions profile.
+ *
+ * Everything it enforces is mandatory — there is no toggle to read, and the two preference files
+ * it watches are re-asserted by [MandatoryProtection] if a write ever puts them out of line.
+ */
 @SuppressLint("AccessibilityPolicy")
 class SarimAccessibilityService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var currentPackage: String? = null
-    private var sessionStartTime: Long = 0
-    private var lastCheckDate: String = LocalDate.now().toString()
-    private val lastClosedTimes = HashMap<String, Long>();
 
-    // Apps with a reopen interval that lost the screen, keyed to when. Leaving only counts as closing once
-    // the home screen shows; coming back first (a popup, recents, an app opened from a notification) cancels it.
-    private val pendingLeaves = HashMap<String, Long>()
-    private val homeScreenDetector by lazy { HomeScreenDetector(this) }
-
-    private lateinit var limitPrefs: SharedPreferences
-    private lateinit var weeklyLimitPrefs: SharedPreferences
-    private lateinit var usagePrefs: SharedPreferences
-    private lateinit var reopenPrefs: SharedPreferences
-    private lateinit var timeWindowPrefs: SharedPreferences
-    private lateinit var groupsPrefs: SharedPreferences
-    private lateinit var groupUsagePrefs: SharedPreferences
     private lateinit var blockedWordsPrefs: SharedPreferences
     private lateinit var securityPrefs: SharedPreferences
     private lateinit var ratingPrefs: SharedPreferences
     private lateinit var visualBlockingPrefs: SharedPreferences
-    private lateinit var usageWarningPrefs: SharedPreferences
-    private lateinit var colorFilterPrefs: SharedPreferences
 
     private var forbiddenPatterns: Map<String, Regex> = emptyMap()
     private var passiveForbiddenPatterns: Map<String, Map<String, Regex>> = emptyMap()
@@ -120,11 +88,9 @@ class SarimAccessibilityService : AccessibilityService() {
     // Cached copies of visualBlockingPrefs (VisualBlockingSettings), refreshed in
     // updateVisualBlockingSettings() so onAccessibilityEvent doesn't hit SharedPreferences on
     // every event — kept in sync live via prefsListener while the settings screen is open.
-    private var nsfwEnabled: Boolean = false
     private var nsfwTargetPackages: Set<String> = VisualBlockingSettings.DEFAULT_TARGET_PACKAGES
     private var nsfwCategories: Set<String> = VisualBlockingSettings.DEFAULT_CATEGORIES
     private var nsfwThreshold: Float = VisualBlockingSettings.DEFAULT_THRESHOLD
-    private var nsfwSuspendEnabled: Boolean = false
     private var nsfwSuspendBlockCount: Int = VisualBlockingSettings.DEFAULT_SUSPEND_BLOCK_COUNT
     private var nsfwSuspendWindowMinutes: Int = VisualBlockingSettings.DEFAULT_SUSPEND_WINDOW_MINUTES
     private var nsfwSuspendDurationMinutes: Int = VisualBlockingSettings.DEFAULT_SUSPEND_DURATION_MINUTES
@@ -132,19 +98,9 @@ class SarimAccessibilityService : AccessibilityService() {
     // Sliding-window block counter + persisted deadlines of the timed suspensions above.
     private lateinit var nsfwSuspensionTracker: VisualBlockingSuspensionTracker
 
-    private var usageWarningEnabled: Boolean = UsageWarningSettings.DEFAULT_ENABLED
-    private var usageWarningStages: List<UsageAlertStage> = emptyList()
-
-    private var currentWarnKey: String? = null
-
-    private var activeStageId: String? = null
-
     // Pending "lift the suspension" callbacks, keyed by package so a new suspension of the same
     // app replaces the previous timer instead of racing it.
     private val nsfwSuspensionReleases = HashMap<String, Runnable>()
-
-    // Same idea for the impulse block, which suspends its whole app list as one unit.
-    private var impulseReleaseRunnable: Runnable? = null
 
     // NsfwContentDetector may use a GPU delegate, which LiteRT requires to be created and
     // driven from the same thread — this dedicated single-thread dispatcher is what gives it
@@ -173,34 +129,26 @@ class SarimAccessibilityService : AccessibilityService() {
             val isBrowser = manager.isBrowser(packageName)
 
             if (isBrowser) {
-                val supportsRestrictions = manager.supportsRestrictions(packageName)
-                if (supportsRestrictions) {
-                    manager.applyRestrictions(installed = true)
+                // A new browser must get the adult-site list and forced SafeSearch before it is
+                // ever opened; one that can't take managed restrictions is suspended instead.
+                if (manager.supportsRestrictions(packageName)) {
+                    manager.applyRestrictions()
                     return
                 }
 
                 suspendPackage(packageName)
             }
             else {
-                val isTorrentApp = manager.isTorrentApp(packageName)
-                if (isTorrentApp && SecurityManager.isBlockTorrentsEnabled(applicationContext)) {
+                if (manager.isTorrentApp(packageName)) {
                     suspendPackage(packageName)
-                    // Track it, or switching the toggle off would never release an app that was
-                    // installed while the block was already on.
-                    SecurityManager.setTorrentSuspendedPackages(
-                        applicationContext,
-                        SecurityManager.getTorrentSuspendedPackages(applicationContext) + packageName
-                    )
+                    rememberSuspension(TORRENT_SUSPENDED_KEY, packageName)
                 }
 
                 // Tor / Orbot: official ids, identity match on the package name/label, or the
                 // installed-app sweep — see BrowserRestrictionsManager.isTorApp.
-                if (manager.isTorApp(packageName) && SecurityManager.isBlockTorEnabled(applicationContext)) {
+                if (manager.isTorApp(packageName)) {
                     suspendPackage(packageName)
-                    SecurityManager.setTorSuspendedPackages(
-                        applicationContext,
-                        SecurityManager.getTorSuspendedPackages(applicationContext) + packageName
-                    )
+                    rememberSuspension(TOR_SUSPENDED_KEY, packageName)
                 }
             }
 
@@ -208,7 +156,6 @@ class SarimAccessibilityService : AccessibilityService() {
                 serviceScope.launch(Dispatchers.IO) {
                     try {
                         val info = PlayStoreRatingFetcher.fetch(packageName)
-
 
                         if (info.hasExplicitContent && info.contentRating == "Rated 18+")
                             withContext(Dispatchers.Main) {
@@ -229,101 +176,36 @@ class SarimAccessibilityService : AccessibilityService() {
         }
     }
 
-    private var lastForegroundPackage: String? = null
-
-    private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                Intent.ACTION_SCREEN_OFF -> {
-                    lastForegroundPackage = currentPackage
-                    stopTrackingAndSave(screenOff = true)
-                    currentPackage = null
-                }
-
-                Intent.ACTION_SCREEN_ON -> {
-                    syncColorFilters()
-                    lastForegroundPackage?.let {
-                        currentPackage = it
-                        sessionStartTime = SystemClock.elapsedRealtime()
-                        checkDateReset()
-                        startTracking(it)
-                    }
-                }
-
-                Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> syncColorFilters()
-            }
-        }
-    }
-
-    private val colorFilterObserver = object : ContentObserver(handler) {
-        override fun onChange(selfChange: Boolean) {
-            syncColorFilters()
+    private fun rememberSuspension(key: String, packageName: String) {
+        securityPrefs.edit {
+            putStringSet(key, (securityPrefs.getStringSet(key, emptySet()) ?: emptySet()) + packageName)
         }
     }
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         when (prefs) {
-            limitPrefs, weeklyLimitPrefs -> {
-                if (key == currentPackage) {
-                    handler.removeCallbacks(blockRunnable)
-                    currentPackage?.let { startTracking(it) }
-                }
-            }
-
-            timeWindowPrefs -> {
-                if (key == currentPackage) {
-                    handler.removeCallbacks(blockRunnable)
-                    handler.removeCallbacks(windowEndRunnable)
-                    currentPackage?.let { startTracking(it) }
-                }
-            }
-
-            groupsPrefs -> {
-                handler.removeCallbacks(blockRunnable)
-                handler.removeCallbacks(windowEndRunnable)
-                currentPackage?.let { startTracking(it) }
-            }
-
-            blockedWordsPrefs -> {
-                updateForbiddenPatterns()
-            }
+            blockedWordsPrefs -> updateForbiddenPatterns()
 
             visualBlockingPrefs -> {
                 updateVisualBlockingSettings()
-                // Turning visual blocking off is the exact route the strictness lock exists to
-                // close; re-assert it and the rest of what the lock pins.
-                StrictnessLock.enforce(applicationContext)
-            }
-
-            colorFilterPrefs -> {
-                syncColorFilters()
-            }
-
-            usageWarningPrefs -> {
-                updateUsageWarningSettings()
-                if (!usageWarningEnabled) {
-                    cancelActiveUsageWarning()
-                }
-                currentPackage?.let { startTracking(it) }
+                // Turning visual blocking off is the exact route the mandatory protection
+                // exists to close; re-assert it.
+                MandatoryProtection.enforce(applicationContext)
             }
 
             securityPrefs -> {
-                // Written by SecurityManager both when the panic button starts a block and when
-                // the block is found to have run out.
-                if (key == "impulse_block_active") syncImpulseSuspension()
-                // The "Block Tor / Orbot" switch itself. Order matters: re-assert the lock first,
-                // then bring the Tor suspensions in line with whatever it settled on.
-                if (key == "block_tor") {
-                    StrictnessLock.enforce(applicationContext)
+                // The mandatory guardrail prefs. Re-assert the whole stack first, then bring the
+                // Tor/torrent suspensions in line with whatever it settled on.
+                if (key == MandatoryProtection.KEY_BLOCK_TOR) {
+                    MandatoryProtection.enforce(applicationContext)
                     syncTorSuspension()
                 }
-                if (key == "block_torrents") syncTorrentSuspension()
+                if (key == MandatoryProtection.KEY_BLOCK_TORRENTS) syncTorrentSuspension()
             }
         }
     }
 
     private fun updateVisualBlockingSettings() {
-        nsfwEnabled = visualBlockingPrefs.getBoolean(VisualBlockingSettings.KEY_ENABLED, false)
         nsfwTargetPackages = visualBlockingPrefs.getStringSet(
             VisualBlockingSettings.KEY_TARGET_PACKAGES, VisualBlockingSettings.DEFAULT_TARGET_PACKAGES
         ) ?: VisualBlockingSettings.DEFAULT_TARGET_PACKAGES
@@ -332,9 +214,6 @@ class SarimAccessibilityService : AccessibilityService() {
         ) ?: VisualBlockingSettings.DEFAULT_CATEGORIES
         nsfwThreshold = visualBlockingPrefs.getFloat(
             VisualBlockingSettings.KEY_THRESHOLD, VisualBlockingSettings.DEFAULT_THRESHOLD
-        )
-        nsfwSuspendEnabled = visualBlockingPrefs.getBoolean(
-            VisualBlockingSettings.KEY_SUSPEND_ENABLED, false
         )
         nsfwSuspendBlockCount = visualBlockingPrefs.getInt(
             VisualBlockingSettings.KEY_SUSPEND_BLOCK_COUNT,
@@ -350,74 +229,34 @@ class SarimAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun updateUsageWarningSettings() {
-        usageWarningEnabled = usageWarningPrefs.getBoolean(
-            UsageWarningSettings.KEY_ENABLED, UsageWarningSettings.DEFAULT_ENABLED
-        )
-        usageWarningStages = UsageWarningSettings.loadOrSeedStages(usageWarningPrefs)
-            .sortedByDescending { it.minutesBefore }
-    }
-
-    private fun cancelActiveUsageWarning() {
-        val key = currentWarnKey ?: return
-        val stageId = activeStageId ?: return
-        UsageWarningNotifier.cancel(applicationContext, key, stageId)
-    }
-
     private fun updateForbiddenPatterns() {
         val words = blockedWordsPrefs.getStringSet("blocked_words", emptySet()) ?: emptySet()
-        forbiddenPatterns = words.associateWith { word ->
-            Regex(
-                "(?<![\\p{L}\\p{N}_])${Regex.escape(word)}(?![\\p{L}\\p{N}_])",
-                RegexOption.IGNORE_CASE
-            )
-        }
+        forbiddenPatterns = words.associateWith { word -> wordRegex(word) }
         targetPackages = blockedWordsPrefs.getStringSet("target_packages", emptySet()) ?: emptySet()
 
-        val all = blockedWordsPrefs.all
         val passiveMap = mutableMapOf<String, Map<String, Regex>>()
-        all.forEach { (key, value) ->
+        blockedWordsPrefs.all.forEach { (key, value) ->
             if (key.startsWith("passive_words_")) {
                 val pkg = key.substringAfter("passive_words_")
                 val wordsSet = (value as? Set<*>)?.filterIsInstance<String>()?.toSet() ?: emptySet()
                 if (wordsSet.isNotEmpty()) {
-                    passiveMap[pkg] = wordsSet.associateWith { word ->
-                        Regex(
-                            "(?<![\\p{L}\\p{N}_])${Regex.escape(word)}(?![\\p{L}\\p{N}_])",
-                            RegexOption.IGNORE_CASE
-                        )
-                    }
+                    passiveMap[pkg] = wordsSet.associateWith { word -> wordRegex(word) }
                 }
             }
         }
         passiveForbiddenPatterns = passiveMap
     }
 
-    private val blockRunnable = Runnable {
-        executeBlocking()
-    }
-
-    private val windowEndRunnable = Runnable {
-        executeBlocking(outsideWindow = true)
-    }
-
-    private val warnTickRunnable = Runnable {
-        tickUsageWarning()
-    }
-
-    private val colorFilterSyncRunnable = Runnable {
-        syncColorFilters()
-    }
-
-    private val nightLightOverlay by lazy { NightLightOverlay(this) }
-
-    private var colorFilterForegroundPackage: String? = null
-    private var colorFilterAppliedModes: Set<ColorFilterMode> = emptySet()
+    private fun wordRegex(word: String) = Regex(
+        "(?<![\\p{L}\\p{N}_])${Regex.escape(word)}(?![\\p{L}\\p{N}_])",
+        RegexOption.IGNORE_CASE
+    )
 
     companion object {
         private const val NSFW_SCAN_INTERVAL_MS = 2000L
 
-        private const val USAGE_WARNING_TICK_INTERVAL_MS = 2000L
+        private const val TOR_SUSPENDED_KEY = "tor_suspended_packages"
+        private const val TORRENT_SUSPENDED_KEY = "torrent_suspended_packages"
 
         // --- Generic, app-agnostic media-detection signals, tried in this order for every app ---
 
@@ -475,22 +314,6 @@ class SarimAccessibilityService : AccessibilityService() {
             private set
 
         fun prepareServiceDisable() { disablingService = true }
-
-        val accessedActivities = mutableStateListOf<ActivityLog>()
-
-        data class ActivityLog(
-            val packageName: String,
-            val className: String,
-            val timestamp: Long = System.currentTimeMillis()
-        )
-
-        private fun addLog(packageName: String, className: String) {
-            if (accessedActivities.any { it.packageName == packageName && it.className == className }) {
-                accessedActivities.removeIf { it.packageName == packageName && it.className == className }
-            }
-            accessedActivities.add(0, ActivityLog(packageName, className))
-            if (accessedActivities.size > 100) accessedActivities.removeAt(accessedActivities.lastIndex)
-        }
     }
 
     override fun onServiceConnected() {
@@ -498,50 +321,26 @@ class SarimAccessibilityService : AccessibilityService() {
         isRunning = true
         disablingService = false
 
-        limitPrefs = getSharedPreferences(AppTimeLimits.PREFS_NAME, MODE_PRIVATE)
-        weeklyLimitPrefs = getSharedPreferences(AppTimeLimits.WEEKLY_PREFS_NAME, MODE_PRIVATE)
-        usagePrefs = getSharedPreferences("internal_usage_stats", MODE_PRIVATE)
-        reopenPrefs = getSharedPreferences("reopen_times", MODE_PRIVATE)
-        timeWindowPrefs = getSharedPreferences(AppTimeWindows.PREFS_NAME, MODE_PRIVATE)
-        groupsPrefs = getSharedPreferences(AppGroupRepository.PREFS_NAME, MODE_PRIVATE)
-        groupUsagePrefs = getSharedPreferences("group_usage_stats", MODE_PRIVATE)
         blockedWordsPrefs = getSharedPreferences("blocked_words_prefs", MODE_PRIVATE)
         securityPrefs = getSharedPreferences("security_prefs", MODE_PRIVATE)
         ratingPrefs = getSharedPreferences("app_ratings", MODE_PRIVATE)
         visualBlockingPrefs = getSharedPreferences(VisualBlockingSettings.PREFS_NAME, MODE_PRIVATE)
-        usageWarningPrefs = getSharedPreferences(UsageWarningSettings.PREFS_NAME, MODE_PRIVATE)
-        colorFilterPrefs = getSharedPreferences(ColorFilterSettings.PREFS_NAME, MODE_PRIVATE)
-        ColorFilterSettings.migrate(colorFilterPrefs)
         nsfwSuspensionTracker = VisualBlockingSuspensionTracker(applicationContext)
 
-        limitPrefs.registerOnSharedPreferenceChangeListener(prefsListener)
-        weeklyLimitPrefs.registerOnSharedPreferenceChangeListener(prefsListener)
-        timeWindowPrefs.registerOnSharedPreferenceChangeListener(prefsListener)
-        groupsPrefs.registerOnSharedPreferenceChangeListener(prefsListener)
         blockedWordsPrefs.registerOnSharedPreferenceChangeListener(prefsListener)
         visualBlockingPrefs.registerOnSharedPreferenceChangeListener(prefsListener)
-        usageWarningPrefs.registerOnSharedPreferenceChangeListener(prefsListener)
-        colorFilterPrefs.registerOnSharedPreferenceChangeListener(prefsListener)
         securityPrefs.registerOnSharedPreferenceChangeListener(prefsListener)
+
+        // Rewrites anything an older version — or a stale preference write — left off.
+        MandatoryProtection.enforce(applicationContext)
 
         updateForbiddenPatterns()
         updateVisualBlockingSettings()
-        updateUsageWarningSettings()
 
-        ColorFilterController.observedUris.forEach {
-            contentResolver.registerContentObserver(it, false, colorFilterObserver)
-        }
-        syncColorFilters()
-
-        val blockedPackages = getControlledPackages()
-        suspendPackages(blockedPackages, false)
-
-        // Must run after the un-suspend above, which would otherwise release a package that is
-        // still serving a visual-blocking suspension, an impulse block or a focus period.
+        // Must run after the un-suspend above could have released a package that is still
+        // serving a visual-blocking suspension.
         restoreNsfwSuspensions()
-        syncImpulseSuspension()
-        FocusMode.sync(applicationContext)
-        StrictnessLock.enforce(applicationContext)
+        CommitmentLock.enforce(applicationContext)
         syncTorSuspension()
         syncTorrentSuspension()
 
@@ -558,14 +357,6 @@ class SarimAccessibilityService : AccessibilityService() {
         }
         registerReceiver(packageReceiver, packageFilter)
 
-        val screenFilter = IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_OFF)
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_TIME_CHANGED)
-            addAction(Intent.ACTION_TIMEZONE_CHANGED)
-        }
-        registerReceiver(screenReceiver, screenFilter)
-
         if (BuildConfig.DEBUG) {
             val filter = IntentFilter("com.sarim.app.DEBUG_INSTALL")
             val receiver = object : BroadcastReceiver() {
@@ -575,7 +366,6 @@ class SarimAccessibilityService : AccessibilityService() {
                         putBoolean(SecurityManager.DEBUG_AUTO_START_SESSION_KEY, true)
                     }
                     SecurityManager.suspendUnknownSourcesRestrictionForDebugInstall(context)
-                    FocusService.stopForDebugInstall(context)
                     disableSelf()
                 }
             }
@@ -591,29 +381,14 @@ class SarimAccessibilityService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         unregisterReceiver(packageReceiver)
-        unregisterReceiver(screenReceiver)
-        limitPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
-        weeklyLimitPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
-        timeWindowPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
-        groupsPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         blockedWordsPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         visualBlockingPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
-        usageWarningPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
-        colorFilterPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         securityPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
-        contentResolver.unregisterContentObserver(colorFilterObserver)
-        handler.removeCallbacks(colorFilterSyncRunnable)
-        // Must run after unregistering the observer, or restoring would re-enforce the modes.
-        ColorFilterController.release(applicationContext)
-        nightLightOverlay.hide()
-        impulseReleaseRunnable?.let { handler.removeCallbacks(it) }
-        impulseReleaseRunnable = null
         // Drop the pending release timers: with the service gone the block below re-suspends the
         // controlled packages on purpose, and a stale timer firing afterwards would undo that.
         // The deadlines stay persisted, so restoreNsfwSuspensions() picks them up on reconnect.
         nsfwSuspensionReleases.values.forEach { handler.removeCallbacks(it) }
         nsfwSuspensionReleases.clear()
-        stopTrackingAndSave()
         // Close on the same thread that created/drove it (GPU delegate requirement), then let
         // that queued close finish before shutting the dispatcher's executor down.
         val detectorToClose = nsfwDetector
@@ -625,8 +400,7 @@ class SarimAccessibilityService : AccessibilityService() {
         isRunning = false
 
         if (!disablingService) {
-            val blockedPackages = getControlledPackages()
-            suspendPackages(blockedPackages)
+            suspendPackages(getControlledPackages())
 
             val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
             val admin = ComponentName(this, SarimDeviceAdminReceiver::class.java)
@@ -643,14 +417,9 @@ class SarimAccessibilityService : AccessibilityService() {
         return super.onUnbind(intent)
     }
 
-    override fun onInterrupt() {
-        handler.removeCallbacks(blockRunnable)
-        handler.removeCallbacks(windowEndRunnable)
-        handler.removeCallbacks(warnTickRunnable)
-    }
+    override fun onInterrupt() = Unit
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) onColorFilterForegroundChanged(event)
         if (event.packageName == packageName) return
 
         if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
@@ -659,7 +428,6 @@ class SarimAccessibilityService : AccessibilityService() {
             checkActiveBlocking()
         }
 
-        // App tracking to control time limits and time between re-openings
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val newPackage = event.packageName?.toString() ?: return
             val className = event.className?.toString() ?: return
@@ -669,35 +437,13 @@ class SarimAccessibilityService : AccessibilityService() {
             ) return
 
             if (newPackage != currentPackage) {
-                stopTrackingAndSave()
-                pendingLeaves.remove(newPackage)
                 currentPackage = newPackage
-                sessionStartTime = SystemClock.elapsedRealtime()
-                checkDateReset()
-                startTracking(newPackage)
                 wasTypingActively = false
                 lastActiveTypedText = ""
 
-                if (nsfwEnabled && newPackage in nsfwTargetPackages) {
+                if (newPackage in nsfwTargetPackages) {
                     warmUpNsfwDetector()
                 }
-            }
-
-            // Checked on every launcher event, not just on a package change: going from recents to home stays in the launcher.
-            if (pendingLeaves.isNotEmpty() && homeScreenDetector.isHomeScreen(event, rootInActiveWindow)) {
-                pendingLeaves.forEach { (pkg, leftAt) -> lastClosedTimes[pkg] = leftAt }
-                pendingLeaves.clear()
-            }
-
-            if (className.contains("Activity", ignoreCase = true)) {
-                addLog(newPackage, className)
-                val blockerPrefs =
-                    getSharedPreferences("activity_blocker_prefs", MODE_PRIVATE)
-                val blockedActivities =
-                    blockerPrefs.getStringSet("blocked_activities", emptySet()) ?: emptySet()
-
-                if (blockedActivities.contains(className))
-                    performGlobalAction(GLOBAL_ACTION_BACK)
             }
         }
 
@@ -705,7 +451,7 @@ class SarimAccessibilityService : AccessibilityService() {
         else if (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             val pkg = currentPackage ?: return
 
-            if (nsfwEnabled && pkg in nsfwTargetPackages) {
+            if (pkg in nsfwTargetPackages) {
                 maybeScanForNsfwContent(pkg)
             }
 
@@ -800,8 +546,8 @@ class SarimAccessibilityService : AccessibilityService() {
     /**
      * Classifies the media currently on screen with [NsfwContentDetector], throttled to at
      * most once every [NSFW_SCAN_INTERVAL_MS] and never overlapping a scan already in progress
-     * — Reddit fires content-changed events continuously while scrolling, so without this the
-     * screen would be captured and run through the model far more often than needed. A
+     * — the monitored feeds fire content-changed events continuously while scrolling, so without
+     * this the screen would be captured and run through the model far more often than needed. A
      * screenshot is only taken when [findNsfwMediaRegions] finds at least one candidate region,
      * since most content-changed events (text, votes, comments) have nothing to classify.
      */
@@ -900,9 +646,9 @@ class SarimAccessibilityService : AccessibilityService() {
      * ([NSFW_MEDIA_CLASS_KEYWORDS]), accessibility text/description vocabulary ([NSFW_MEDIA_KEYWORDS]),
      * Reddit's post-card pattern ([NSFW_MEDIA_DESCRIPTION_PATTERNS]) — then, only if none of those
      * found anything on this screen, the geometric fallback (leaf node, no text at all, plausible
-     * photo/video size and aspect ratio). None of these are Compose-aware, so an app like Reddit
-     * that renders everything as plain `android.view.View` only gets caught via the text-based or
-     * geometric signals, never the class-based one.
+     * photo/video size and aspect ratio). None of these are Compose-aware, so an app that renders
+     * everything as plain `android.view.View` only gets caught via the text-based or geometric
+     * signals, never the class-based one.
      *
      * Small nodes (avatars, vote icons) are filtered out via [NSFW_MIN_MEDIA_SIZE_DP].
      */
@@ -994,13 +740,11 @@ class SarimAccessibilityService : AccessibilityService() {
     /**
      * Reaction to the classifier flagging the screen of [pkg].
      *
-     * Default behaviour — and what still happens for every block that doesn't complete a window —
-     * is to suspend and immediately un-suspend the package: suspending is what force-closes the
+     * Every block escalates: once [pkg] has been blocked [nsfwSuspendBlockCount] times within
+     * [nsfwSuspendWindowMinutes], the suspension is left in place for
+     * [nsfwSuspendDurationMinutes] instead of being lifted straight away. Below that threshold
+     * the package is suspended and immediately un-suspended: suspending is what force-closes the
      * app, un-suspending right after leaves the user free to reopen it.
-     *
-     * With the "suspend app" option on, repeated blocks escalate: once [pkg] has been blocked
-     * [nsfwSuspendBlockCount] times within [nsfwSuspendWindowMinutes], the suspension is left in
-     * place for [nsfwSuspendDurationMinutes] instead of being lifted straight away.
      */
     private fun executeNsfwBlocking(pkg: String) {
         // Suspending a package doesn't tear its window down instantly, and the blocked-content
@@ -1013,18 +757,16 @@ class SarimAccessibilityService : AccessibilityService() {
             return
         }
 
-        if (nsfwSuspendEnabled) {
-            val shouldSuspend = nsfwSuspensionTracker.registerBlock(
-                pkg, nsfwSuspendBlockCount, nsfwSuspendWindowMinutes
-            )
-            if (shouldSuspend) {
-                val until = nsfwSuspensionTracker.startSuspension(pkg, nsfwSuspendDurationMinutes)
-                suspendPackage(pkg)
-                scheduleNsfwSuspensionRelease(pkg, until)
-                Timber.d("NSFW scan: $pkg suspended for $nsfwSuspendDurationMinutes min (until $until)")
-                showNsfwBlockedActivity(nsfwSuspendDurationMinutes)
-                return
-            }
+        val shouldSuspend = nsfwSuspensionTracker.registerBlock(
+            pkg, nsfwSuspendBlockCount, nsfwSuspendWindowMinutes
+        )
+        if (shouldSuspend) {
+            val until = nsfwSuspensionTracker.startSuspension(pkg, nsfwSuspendDurationMinutes)
+            suspendPackage(pkg)
+            scheduleNsfwSuspensionRelease(pkg, until)
+            Timber.d("NSFW scan: $pkg suspended for $nsfwSuspendDurationMinutes min (until $until)")
+            showNsfwBlockedActivity(nsfwSuspendDurationMinutes)
+            return
         }
 
         suspendPackage(pkg)
@@ -1044,7 +786,7 @@ class SarimAccessibilityService : AccessibilityService() {
         val release = Runnable {
             nsfwSuspensionReleases.remove(pkg)
             nsfwSuspensionTracker.endSuspension(pkg)
-            if (!isHeldByOtherBlock(pkg)) suspendPackage(pkg, suspend = false)
+            suspendPackage(pkg, suspend = false)
             Timber.d("NSFW scan: suspension of $pkg lifted")
         }
         nsfwSuspensionReleases[pkg] = release
@@ -1061,7 +803,7 @@ class SarimAccessibilityService : AccessibilityService() {
         nsfwSuspensionTracker.activeSuspensions().forEach { (pkg, until) ->
             if (until <= now) {
                 nsfwSuspensionTracker.endSuspension(pkg)
-                if (!isHeldByOtherBlock(pkg)) suspendPackage(pkg, suspend = false)
+                suspendPackage(pkg, suspend = false)
             } else {
                 suspendPackage(pkg)
                 scheduleNsfwSuspensionRelease(pkg, until)
@@ -1077,208 +819,44 @@ class SarimAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Brings the app suspensions in line with the current state of the impulse block: suspends the
-     * configured list while a block is running with [SecurityManager.ImpulseAction.TIMER_AND_SUSPEND]
-     * selected, and releases whatever was suspended once it isn't.
+     * Suspends every installed Tor component. The block is mandatory, so there is no "off" path:
+     * a Tor client that was already on the phone never produces the package-added broadcast that
+     * [packageReceiver] reacts to, and this sweep is what catches it.
      *
-     * Called both from the prefs listener (the panic button, and the block expiring) and from
-     * [onServiceConnected], which is what re-applies a block that outlived this service.
-     */
-    private fun syncImpulseSuspension() {
-        val ctx = applicationContext
-        val remaining = SecurityManager.getImpulseBlockRemainingTime(ctx)
-        val targets = SecurityManager.getImpulseSuspendedApps(ctx)
-        val shouldSuspend = remaining > 0 &&
-            SecurityManager.getImpulseAction(ctx) == SecurityManager.ImpulseAction.TIMER_AND_SUSPEND &&
-            targets.isNotEmpty()
-
-        if (!shouldSuspend) {
-            releaseImpulseSuspension()
-            return
-        }
-
-        // The configured list may have changed since the block started; let go of anything that
-        // is no longer part of it before applying the current one.
-        val alreadySuspended = SecurityManager.getActiveImpulseSuspension(ctx)
-        val dropped = (alreadySuspended - targets).filterNot { FocusMode.isHolding(ctx, it) }
-        if (dropped.isNotEmpty()) suspendPackages(dropped.toTypedArray(), false)
-
-        suspendPackages(targets.toTypedArray(), true)
-        SecurityManager.setActiveImpulseSuspension(ctx, targets)
-
-        impulseReleaseRunnable?.let { handler.removeCallbacks(it) }
-        val release = Runnable {
-            impulseReleaseRunnable = null
-            releaseImpulseSuspension()
-        }
-        impulseReleaseRunnable = release
-        handler.postDelayed(release, remaining)
-        Timber.d("Impulse block: suspended ${targets.size} app(s) for ${remaining}ms")
-    }
-
-    private fun releaseImpulseSuspension() {
-        impulseReleaseRunnable?.let { handler.removeCallbacks(it) }
-        impulseReleaseRunnable = null
-
-        val ctx = applicationContext
-        val suspended = SecurityManager.getActiveImpulseSuspension(ctx)
-        if (suspended.isEmpty()) return
-
-        // A package can be serving a visual-blocking suspension or a focus period at the same time;
-        // releasing it here would cut that one short, so those are left alone for their own timer to lift.
-        val releasable = suspended.filterNot { nsfwSuspensionTracker.isSuspended(it) || FocusMode.isHolding(ctx, it) }
-        if (releasable.isNotEmpty()) suspendPackages(releasable.toTypedArray(), false)
-
-        SecurityManager.clearActiveImpulseSuspension(ctx)
-        Timber.d("Impulse block: released ${releasable.size} app(s)")
-    }
-
-    private fun isHeldByOtherBlock(pkg: String): Boolean {
-        val ctx = applicationContext
-        return pkg in SecurityManager.getActiveImpulseSuspension(ctx) || FocusMode.isHolding(ctx, pkg)
-    }
-
-    /**
-     * Brings the "Block Tor / Orbot" toggle in line with what's installed: with it on, every
-     * installed Tor component is suspended; with it off, exactly the apps this feature suspended
-     * are released.
-     *
-     * Suspending on enable — not only on install — is what closes the obvious bypass of putting a
-     * Tor client on the phone *before* turning the toggle on: an app that was already installed
-     * never produces the package-added broadcast that [packageReceiver] reacts to.
-     *
-     * Called from the prefs listener (the switch itself) and from [onServiceConnected], so a
-     * toggle flipped while the service was down still applies.
+     * Called from the prefs listener and from [onServiceConnected], so an app installed while the
+     * service was down is still caught on the next start.
      */
     private fun syncTorSuspension() {
-        val ctx = applicationContext
-        if (!SecurityManager.isBlockTorEnabled(ctx)) {
-            releaseTorSuspension()
-            return
-        }
-
         browserManager.invalidateTorCache()
         val targets = browserManager.getPossibleTorApps()
-            .filterNot {
-                it == packageName || isHeldByOtherBlock(it) || nsfwSuspensionTracker.isSuspended(it)
-            }
+            .filterNot { it == packageName || nsfwSuspensionTracker.isSuspended(it) }
             .toSet()
         if (targets.isEmpty()) return
 
         suspendPackages(targets.toTypedArray(), true)
-        SecurityManager.setTorSuspendedPackages(ctx, targets)
+        securityPrefs.edit { putStringSet(TOR_SUSPENDED_KEY, targets) }
         Timber.d("Tor block: suspended ${targets.size} app(s): $targets")
     }
 
-    private fun releaseTorSuspension() {
-        val ctx = applicationContext
-        val suspended = SecurityManager.getTorSuspendedPackages(ctx)
-        if (suspended.isEmpty()) return
-
-        // Same guard as the impulse release: a package another block is still holding onto must
-        // not be let go here, or that block would end early.
-        val releasable = suspended.filterNot {
-            isHeldByOtherBlock(it) || nsfwSuspensionTracker.isSuspended(it) ||
-                it in SecurityManager.getTorrentSuspendedPackages(ctx)
-        }
-        if (releasable.isNotEmpty()) suspendPackages(releasable.toTypedArray(), false)
-
-        SecurityManager.setTorSuspendedPackages(ctx, emptySet())
-        Timber.d("Tor block: released ${releasable.size} of ${suspended.size} app(s)")
-    }
-
     /**
-     * The same treatment for the "Block Torrent apps" switch. Detection already sees a torrent
-     * client an hour after it was installed — the intent queries don't care when it arrived — but
-     * nothing suspends it unless [packageReceiver] fires, so an app put on the phone *before* the
-     * toggle was flipped stayed usable indefinitely.
-     *
-     * Called from the prefs listener (the switch itself) and from [onServiceConnected], so a
-     * toggle flipped while the service was down still applies.
+     * The same treatment for torrent clients: detection already sees one an hour after it was
+     * installed — the intent queries don't care when it arrived — but nothing suspends it unless
+     * [packageReceiver] fires.
      */
     private fun syncTorrentSuspension() {
-        val ctx = applicationContext
-        if (!SecurityManager.isBlockTorrentsEnabled(ctx)) {
-            releaseTorrentSuspension()
-            return
-        }
-
         browserManager.invalidateTorrentCache()
         val targets = browserManager.getPossibleTorrentApps()
-            .filterNot {
-                it == packageName || isHeldByOtherBlock(it) || nsfwSuspensionTracker.isSuspended(it)
-            }
+            .filterNot { it == packageName || nsfwSuspensionTracker.isSuspended(it) }
             .toSet()
         if (targets.isEmpty()) return
 
         suspendPackages(targets.toTypedArray(), true)
-        SecurityManager.setTorrentSuspendedPackages(ctx, targets)
+        securityPrefs.edit { putStringSet(TORRENT_SUSPENDED_KEY, targets) }
         Timber.d("Torrent block: suspended ${targets.size} app(s): $targets")
     }
 
-    private fun releaseTorrentSuspension() {
-        val ctx = applicationContext
-        val suspended = SecurityManager.getTorrentSuspendedPackages(ctx)
-        if (suspended.isEmpty()) return
-
-        // A package still held by the impulse block, a focus period, visual blocking or the Tor
-        // block must not be let go here, or that block would end early.
-        val releasable = suspended.filterNot {
-            isHeldByOtherBlock(it) || nsfwSuspensionTracker.isSuspended(it) ||
-                it in SecurityManager.getTorSuspendedPackages(ctx)
-        }
-        if (releasable.isNotEmpty()) suspendPackages(releasable.toTypedArray(), false)
-
-        SecurityManager.setTorrentSuspendedPackages(ctx, emptySet())
-        Timber.d("Torrent block: released ${releasable.size} of ${suspended.size} app(s)")
-    }
-
-    private fun syncColorFilters() {
-        handler.removeCallbacks(colorFilterSyncRunnable)
-
-        val modes = ColorFilterSettings.modesToApply(colorFilterPrefs, colorFilterForegroundPackage)
-        colorFilterAppliedModes = modes
-        if (modes.isNotEmpty()) {
-            ColorFilterController.enforce(applicationContext, ColorFilterController.targetsFor(colorFilterPrefs, modes))
-        } else {
-            ColorFilterController.release(applicationContext)
-        }
-
-        val overlayNightLight = !ColorFilterController.platformNightLight && ColorFilterMode.NIGHT_LIGHT in modes
-        if (overlayNightLight) {
-            nightLightOverlay.show(
-                ColorFilterSettings.nightLightTemperature(colorFilterPrefs),
-                ColorFilterSettings.nightLightIntensity(colorFilterPrefs)
-            )
-        } else {
-            nightLightOverlay.hide()
-        }
-
-        if (!ColorFilterSettings.isEnabled(colorFilterPrefs)) return
-        val delay = ColorFilterSettings.millisUntilNextBoundary(ColorFilterSettings.scheduledWindows(colorFilterPrefs))
-            ?: return
-        handler.postDelayed(colorFilterSyncRunnable, delay)
-    }
-
-    // Kept apart from currentPackage, which skips Sarim's own screens and is cleared when an app gets blocked.
-    private fun onColorFilterForegroundChanged(event: AccessibilityEvent) {
-        val pkg = event.packageName?.toString() ?: return
-        val className = event.className?.toString() ?: return
-        if (pkg == "com.android.systemui") return
-        if (className.contains("InputMethodService", ignoreCase = true) ||
-            className.contains("SoftInputWindow", ignoreCase = true)
-        ) return
-        // Our own overlays (e.g. night light) aren't a screen the user switched to.
-        if (pkg == packageName && !className.startsWith(packageName)) return
-        if (pkg == colorFilterForegroundPackage) return
-
-        colorFilterForegroundPackage = pkg
-        if (!ColorFilterSettings.dependsOnForegroundApp(colorFilterPrefs)) return
-        val modes = ColorFilterSettings.modesToApply(colorFilterPrefs, pkg)
-        if (modes != colorFilterAppliedModes) syncColorFilters()
-    }
-
     private fun suspendPackages(packages: Array<String>, suspend: Boolean = true) {
+        if (packages.isEmpty()) return
         val dpm =
             applicationContext.getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
         val admin = ComponentName(applicationContext, SarimDeviceAdminReceiver::class.java)
@@ -1290,20 +868,9 @@ class SarimAccessibilityService : AccessibilityService() {
         arrayOf(packageName), suspend
     )
 
-    private fun getControlledPackages(): Array<String> {
-        val restrictedGroupPackages = AppGroupRepository.getGroups()
-            .filter { it.timeLimit.isSet || it.timeWindows.isNotEmpty() }
-            .flatMap { it.packageNames }
-
-        return targetPackages
-            .union(passiveForbiddenPatterns.keys)
-            .union(limitPrefs.all.keys)
-            .union(weeklyLimitPrefs.all.keys)
-            .union(reopenPrefs.all.keys)
-            .union(timeWindowPrefs.all.keys)
-            .union(restrictedGroupPackages)
-            .toTypedArray()
-    }
+    /** Apps that are suspended when the accessibility service goes down. */
+    private fun getControlledPackages(): Array<String> =
+        targetPackages.union(passiveForbiddenPatterns.keys).toTypedArray()
 
     private fun checkForbiddenWord(text: String): String? {
         forbiddenPatterns.forEach { (word: String, regex: Regex) ->
@@ -1347,281 +914,4 @@ class SarimAccessibilityService : AccessibilityService() {
         performGlobalAction(GLOBAL_ACTION_BACK)
         showBlockedActivity(forbiddenWord)
     }
-
-    /**
-     * The app's own settings plus its group's, when it belongs to one. A group does not replace
-     * the app's individual limit/windows — it adds another cap alongside them, and whichever of
-     * the two is more restrictive is the one that actually applies (see [startTracking]).
-     * Limits that vary by weekday are resolved to today's value here.
-     */
-    private data class TrackingConfig(
-        val group: AppGroup?,
-        val appLimitMinutes: Int,
-        val groupLimitMinutes: Int,
-        val windows: List<TimeWindow>
-    )
-
-    private fun trackingConfigFor(pkg: String): TrackingConfig {
-        val group = AppGroupRepository.getGroupForPackage(pkg)
-        val appWindows = AppTimeWindows.decode(timeWindowPrefs.getString(pkg, null))
-        val appLimitMinutes = AppTimeLimits.read(limitPrefs, weeklyLimitPrefs, pkg).todayMinutes()
-        return if (group != null) {
-            TrackingConfig(
-                group = group,
-                appLimitMinutes = appLimitMinutes,
-                groupLimitMinutes = group.timeLimit.todayMinutes(),
-                windows = TimeWindow.intersect(group.timeWindows, appWindows)
-            )
-        } else {
-            TrackingConfig(null, appLimitMinutes, 0, appWindows)
-        }
-    }
-
-    private fun startTracking(pkg: String) {
-        handler.removeCallbacks(warnTickRunnable)
-
-        val config = trackingConfigFor(pkg)
-
-        if (config.windows.isNotEmpty()) {
-            val nowMinute = currentMinuteOfDay()
-            val activeWindow = config.windows.firstOrNull { it.contains(nowMinute) }
-            if (activeWindow == null) {
-                executeBlocking(outsideWindow = true)
-                return
-            }
-            handler.postDelayed(
-                windowEndRunnable,
-                TimeUnit.MINUTES.toMillis(activeWindow.minutesUntilEnd(nowMinute).toLong())
-            )
-        }
-
-        val remainingSecondsReopening = getRemainingSecondsToReopen(pkg)
-        if (config.appLimitMinutes <= 0 && config.groupLimitMinutes <= 0 && remainingSecondsReopening <= 0) return
-
-        var appRemaining: Long? = null
-        var groupRemaining: Long? = null
-        var limitReached = false
-
-        if (config.appLimitMinutes > 0) {
-            val remaining = TimeUnit.MINUTES.toMillis(config.appLimitMinutes.toLong()) - usagePrefs.getLong(pkg, 0L)
-            if (remaining <= 0) limitReached = true else appRemaining = remaining
-        }
-
-        if (config.group != null && config.groupLimitMinutes > 0) {
-            val remaining = TimeUnit.MINUTES.toMillis(config.groupLimitMinutes.toLong()) -
-                groupUsagePrefs.getLong(config.group.id, 0L)
-            if (remaining <= 0) limitReached = true else groupRemaining = remaining
-        }
-
-        if (limitReached) {
-            executeBlocking()
-            return
-        }
-        val remainingMillis = listOfNotNull(appRemaining, groupRemaining).minOrNull()
-        if (remainingMillis != null) {
-            handler.postDelayed(blockRunnable, remainingMillis)
-        }
-
-        scheduleUsageWarning(pkg, config, appRemaining, groupRemaining)
-
-        if (remainingSecondsReopening > 0)
-            executeBlocking(reopening = true, remainingSeconds = remainingSecondsReopening)
-    }
-
-    private fun scheduleUsageWarning(pkg: String, config: TrackingConfig, appRemaining: Long?, groupRemaining: Long?) {
-        currentWarnKey = null
-        activeStageId = null
-        if (!usageWarningEnabled || usageWarningStages.isEmpty()) return
-
-        val useGroup = groupRemaining != null && config.group != null &&
-            (appRemaining == null || groupRemaining < appRemaining)
-        val key = when {
-            useGroup -> config.group!!.id
-            appRemaining != null -> pkg
-            else -> return
-        }
-        val remaining = if (useGroup) groupRemaining!! else appRemaining!!
-
-        currentWarnKey = key
-
-        val farthestMillis = stageMillis(usageWarningStages.first())
-        if (remaining > farthestMillis) {
-            Timber.d("UsageWarning: schedule($key) - outside every stage, entering farthest in ${remaining - farthestMillis}ms")
-            handler.postDelayed(warnTickRunnable, remaining - farthestMillis)
-        } else {
-            tickUsageWarning()
-        }
-    }
-
-    private fun stageMillis(stage: UsageAlertStage) = (stage.minutesBefore * 60_000).toLong()
-
-    private fun tickUsageWarning() {
-        handler.removeCallbacks(warnTickRunnable)
-        val pkg = currentPackage ?: return
-        val key = currentWarnKey ?: return
-        if (usageWarningStages.isEmpty()) return
-
-        val config = trackingConfigFor(pkg)
-        val elapsed = SystemClock.elapsedRealtime() - sessionStartTime
-        val isGroupKey = config.group?.id == key
-
-        val remaining = when {
-            isGroupKey && config.groupLimitMinutes > 0 ->
-                TimeUnit.MINUTES.toMillis(config.groupLimitMinutes.toLong()) - groupUsagePrefs.getLong(key, 0L) - elapsed
-            !isGroupKey && config.appLimitMinutes > 0 ->
-                TimeUnit.MINUTES.toMillis(config.appLimitMinutes.toLong()) - usagePrefs.getLong(pkg, 0L) - elapsed
-            else -> return
-        }
-        Timber.d("UsageWarning: tick($key) pkg=$pkg elapsed=${elapsed}ms remaining=${remaining}ms")
-
-        if (remaining <= 0) {
-            activeStageId?.let { UsageWarningNotifier.cancel(applicationContext, key, it) }
-            activeStageId = null
-            return
-        }
-
-        val enteredStage = usageWarningStages.lastOrNull { remaining <= stageMillis(it) }
-
-        if (enteredStage == null) {
-            activeStageId?.let { staleId ->
-                UsageWarningNotifier.cancel(applicationContext, key, staleId)
-                UsageWarningNotifier.reset(applicationContext, key, staleId)
-            }
-            activeStageId = null
-            val farthestMillis = stageMillis(usageWarningStages.first())
-            handler.postDelayed(warnTickRunnable, (remaining - farthestMillis).coerceAtLeast(500L))
-            return
-        }
-
-        if (enteredStage.id != activeStageId) {
-            activeStageId?.let { UsageWarningNotifier.cancel(applicationContext, key, it) }
-            activeStageId = enteredStage.id
-        }
-
-        if (!UsageWarningNotifier.isDismissed(applicationContext, key, enteredStage.id)) {
-            if (!UsageWarningNotifier.hasBeenShown(applicationContext, key, enteredStage.id)) {
-                UsageWarningNotifier.markShown(applicationContext, key, enteredStage.id)
-            }
-            val displayName = if (isGroupKey) config.group?.name ?: key else appLabel(pkg)
-            val barMillis = stageMillis(usageWarningStages.first())
-            UsageWarningNotifier.showOrUpdate(
-                applicationContext, key, enteredStage, displayName, remaining, barMillis
-            )
-        }
-
-        handler.postDelayed(warnTickRunnable, USAGE_WARNING_TICK_INTERVAL_MS)
-    }
-
-    private fun appLabel(pkg: String): String = try {
-        packageManager.getApplicationInfo(pkg, 0).loadLabel(packageManager).toString()
-    } catch (e: Exception) {
-        pkg
-    }
-
-    private fun stopTrackingAndSave(screenOff: Boolean = false) {
-        handler.removeCallbacks(blockRunnable)
-        handler.removeCallbacks(windowEndRunnable)
-        handler.removeCallbacks(warnTickRunnable)
-        val pkg = currentPackage ?: return
-
-        if (!screenOff && reopenPrefs.getInt(pkg, 0) > 0 && getRemainingSecondsToReopen(pkg) == 0)
-            pendingLeaves[pkg] = SystemClock.elapsedRealtime()
-
-        if (sessionStartTime == 0L) return
-
-        val config = trackingConfigFor(pkg)
-        val currentSessionMillis = SystemClock.elapsedRealtime() - sessionStartTime
-
-        if (config.appLimitMinutes > 0) {
-            usagePrefs.edit { putLong(pkg, usagePrefs.getLong(pkg, 0L) + currentSessionMillis) }
-        }
-        if (config.group != null && config.groupLimitMinutes > 0) {
-            val groupId = config.group.id
-            groupUsagePrefs.edit { putLong(groupId, groupUsagePrefs.getLong(groupId, 0L) + currentSessionMillis) }
-        }
-
-        sessionStartTime = 0
-    }
-
-    private fun executeBlocking(reopening: Boolean = false, remainingSeconds: Int = 0, outsideWindow: Boolean = false) {
-        val pkg = currentPackage ?: return
-        val config = trackingConfigFor(pkg)
-
-        stopTrackingAndSave()
-        currentPackage = null
-
-        if (!reopening && !outsideWindow) {
-            usageWarningStages.forEach { stage ->
-                UsageWarningNotifier.cancel(applicationContext, pkg, stage.id)
-                config.group?.let { UsageWarningNotifier.cancel(applicationContext, it.id, stage.id) }
-            }
-        }
-
-        val individualAppName = appLabel(pkg)
-
-        // For a plain limit block, name and blame whichever cap actually ran out: the app's own,
-        // or (when both are exhausted) the shared group cap, since that's the one still binding.
-        var displayName = individualAppName
-        var displayLimit = config.appLimitMinutes
-        if (!reopening && !outsideWindow && config.group != null && config.groupLimitMinutes > 0) {
-            val groupReached = groupUsagePrefs.getLong(config.group.id, 0L) >=
-                TimeUnit.MINUTES.toMillis(config.groupLimitMinutes.toLong())
-            val appReached = config.appLimitMinutes > 0 &&
-                usagePrefs.getLong(pkg, 0L) >= TimeUnit.MINUTES.toMillis(config.appLimitMinutes.toLong())
-            if (groupReached && !appReached) {
-                displayName = config.group.name
-                displayLimit = config.groupLimitMinutes
-            }
-        }
-
-        val activityClass = when {
-            outsideWindow -> OutsideTimeWindowActivity::class.java
-            reopening -> ReopeningLimitActivity::class.java
-            else -> TimeUpActivity::class.java
-        }
-
-        val intent = Intent(this, activityClass).apply {
-            flags = FLAG_ACTIVITY_NEW_TASK
-            putExtra("appName", displayName)
-        }
-
-        if (outsideWindow) {
-            intent.putStringArrayListExtra("windows", ArrayList(config.windows.map { it.formatted() }))
-        } else {
-            intent.putExtra("limit", if (reopening) remainingSeconds else displayLimit)
-        }
-
-        startActivity(intent)
-    }
-
-    private fun currentMinuteOfDay(): Int {
-        val now = LocalTime.now()
-        return now.hour * 60 + now.minute
-    }
-    
-    
-    private fun checkDateReset() {
-        val today = LocalDate.now().toString()
-        if (today != lastCheckDate) {
-            usagePrefs.edit { clear() }
-            groupUsagePrefs.edit { clear() }
-            cancelActiveUsageWarning()
-            activeStageId = null
-            UsageWarningNotifier.resetAll(applicationContext)
-            lastCheckDate = today
-        }
-    }
-
-    private fun getRemainingSecondsToReopen(pkg: String): Int {
-        val reopenSeconds = reopenPrefs.getInt(pkg, 0)
-        val lastClosedTime = lastClosedTimes.getOrDefault(pkg, 0L)
-        if (reopenSeconds > 0 && lastClosedTime > 0) {
-            val elapsed = SystemClock.elapsedRealtime() - lastClosedTime
-            val elapsedSeconds = TimeUnit.MILLISECONDS.toSeconds(elapsed)
-            if (elapsedSeconds <= reopenSeconds)
-                return max(reopenSeconds - elapsedSeconds.toInt(), 0)
-        }
-        return 0
-    }
-
 }

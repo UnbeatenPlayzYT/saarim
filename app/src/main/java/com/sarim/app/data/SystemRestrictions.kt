@@ -1,14 +1,17 @@
 package com.sarim.app.data
 
 import android.os.UserManager
+import com.sarim.app.security.MandatoryProtection
 
 object SystemRestrictions {
-    val recommendedKeys = listOf(
-        UserManager.DISALLOW_CONFIG_VPN,
-        UserManager.DISALLOW_CONFIG_PRIVATE_DNS,
-        UserManager.DISALLOW_FACTORY_RESET,
-        UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY
-    )
+    /**
+     * Applied by [MandatoryProtection] and shown as always on: each one either routes around the
+     * content filters (VPN, private DNS), installs around them, removes the blocker, or lets the
+     * user boot/debug/rewind their way past it.
+     */
+    val mandatoryKeys: List<String> = MandatoryProtection.RESTRICTIONS
+
+    val recommendedKeys = mandatoryKeys + UserManager.DISALLOW_FACTORY_RESET
 
     val restrictionFieldNames: Map<String, String> by lazy {
         UserManager::class.java.fields

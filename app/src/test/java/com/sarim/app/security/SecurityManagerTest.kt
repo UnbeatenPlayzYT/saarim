@@ -1,7 +1,6 @@
 package com.sarim.app.security
 
 import android.app.admin.DevicePolicyManager
-import android.os.SystemClock
 import android.content.Context
 import androidx.core.content.edit
 import androidx.test.core.app.ApplicationProvider
@@ -119,84 +118,6 @@ class SecurityManagerTest {
         assertTrue(SecurityManager.isSessionActive())
     }
 
-    // ------------------------------------------------------------------ impulse block
-
-    @Test
-    fun impulseBlock_remaining_without_a_block_is_minusOne() {
-        context.getSharedPreferences("security_prefs", Context.MODE_PRIVATE).edit()
-            .remove("impulse_block_active").commit()
-        assertEquals(-1L, SecurityManager.getImpulseBlockRemainingTime(context))
-    }
-
-    @Test
-    fun impulseBlock_start_sets_active_state_with_duration() {
-        SecurityManager.setImpulseDurationMinutes(context, 30)
-        SecurityManager.startImpulseBlock(context)
-
-        val remaining = SecurityManager.getImpulseBlockRemainingTime(context)
-        // ~30 minutes; generous bounds so a slow test machine can't flake.
-        assertTrue("remaining should be close to 30min", remaining in 29 * 60_000L..30 * 60_000L)
-    }
-
-    @Test
-    fun impulseBlock_expires_returns_minusOne_and_clears_state() {
-        SecurityManager.setImpulseDurationMinutes(context, SecurityManager.IMPULSE_MIN_DURATION_MINUTES)
-        SecurityManager.startImpulseBlock(context)
-
-        // Rewind the recorded start so the block has just run out.
-        val prefs = context.getSharedPreferences("security_prefs", Context.MODE_PRIVATE)
-        prefs.edit {
-            putLong("impulse_block_start_rtc", System.currentTimeMillis() - 60 * 60_000L)
-            putLong("impulse_block_start_elapsed", SystemClock.elapsedRealtime() - 60 * 60_000L)
-        }
-
-        assertEquals(-1L, SecurityManager.getImpulseBlockRemainingTime(context))
-        assertFalse(prefs.getBoolean("impulse_block_active", true))
-    }
-
-    @Test
-    fun impulseBlock_clock_moved_forward_is_detected_via_elapsed() {
-        SecurityManager.setImpulseDurationMinutes(context, 30)
-        SecurityManager.startImpulseBlock(context)
-
-        // Fake a forward clock jump of one hour: RTC says expired, elapsed says not.
-        val prefs = context.getSharedPreferences("security_prefs", Context.MODE_PRIVATE)
-        prefs.edit { putLong("impulse_block_start_rtc", System.currentTimeMillis() - 60 * 60_000L) }
-
-        val remaining = SecurityManager.getImpulseBlockRemainingTime(context)
-        assertTrue("elapsed clock should keep the block alive", remaining > 0)
-    }
-
-    // ------------------------------------------------------------------ impulse config
-
-    @Test
-    fun impulseConfig_duration_is_clamped_to_bounds() {
-        SecurityManager.setImpulseDurationMinutes(context, 5)
-        assertEquals(SecurityManager.IMPULSE_MIN_DURATION_MINUTES, SecurityManager.getImpulseDurationMinutes(context))
-
-        SecurityManager.setImpulseDurationMinutes(context, 10_000)
-        assertEquals(SecurityManager.IMPULSE_MAX_DURATION_MINUTES, SecurityManager.getImpulseDurationMinutes(context))
-    }
-
-    @Test
-    fun impulseConfig_suspendedApps_roundTrip() {
-        SecurityManager.setImpulseSuspendedApps(context, setOf("com.a", "com.b"))
-        assertEquals(setOf("com.a", "com.b"), SecurityManager.getImpulseSuspendedApps(context))
-
-        SecurityManager.setImpulseSuspendedApps(context, emptySet())
-        assertEquals(emptySet<String>(), SecurityManager.getImpulseSuspendedApps(context))
-    }
-
-    @Test
-    fun impulseConfig_action_roundTrip_and_default() {
-        context.getSharedPreferences("security_prefs", Context.MODE_PRIVATE).edit()
-            .remove("impulse_action").commit()
-        assertEquals(SecurityManager.ImpulseAction.TIMER_ONLY, SecurityManager.getImpulseAction(context))
-
-        SecurityManager.setImpulseAction(context, SecurityManager.ImpulseAction.TIMER_AND_SUSPEND)
-        assertEquals(SecurityManager.ImpulseAction.TIMER_AND_SUSPEND, SecurityManager.getImpulseAction(context))
-    }
-
     // ------------------------------------------------------------------ access challenges
 
     @Test
@@ -232,28 +153,29 @@ class SecurityManagerTest {
     // ------------------------------------------------------------------ config toggles
 
     @Test
-    fun configToggles_shuffleKeyboard_and_blockTorrents_roundTrip() {
+    fun configToggles_shuffleKeyboard_roundTrip() {
         SecurityManager.setShuffleKeyboardEnabled(context, true)
         assertTrue(SecurityManager.isShuffleKeyboardEnabled(context))
         SecurityManager.setShuffleKeyboardEnabled(context, false)
         assertFalse(SecurityManager.isShuffleKeyboardEnabled(context))
-
-        SecurityManager.setBlockTorrentsEnabled(context, true)
-        assertTrue(SecurityManager.isBlockTorrentsEnabled(context))
-        SecurityManager.setBlockTorrentsEnabled(context, false)
-        assertFalse(SecurityManager.isBlockTorrentsEnabled(context))
     }
 
     @Test
-    fun configToggles_blockTor_defaults_off_and_roundTrips() {
-        context.getSharedPreferences("security_prefs", Context.MODE_PRIVATE).edit()
-            .remove("block_tor").commit()
-        assertFalse("blocking Tor must be opt-in", SecurityManager.isBlockTorEnabled(context))
+    fun mandatoryProtection_is_always_on_and_cannot_be_switched_off() {
+        assertTrue(MandatoryProtection.isBlockTorEnabled())
+        assertTrue(MandatoryProtection.isBlockTorrentsEnabled())
 
-        SecurityManager.setBlockTorEnabled(context, true)
-        assertTrue(SecurityManager.isBlockTorEnabled(context))
-        SecurityManager.setBlockTorEnabled(context, false)
-        assertFalse(SecurityManager.isBlockTorEnabled(context))
+        // A preference left behind by an older version must not switch either block off.
+        context.getSharedPreferences("security_prefs", Context.MODE_PRIVATE).edit()
+            .putBoolean(MandatoryProtection.KEY_BLOCK_TOR, false)
+            .putBoolean(MandatoryProtection.KEY_BLOCK_TORRENTS, false)
+            .commit()
+
+        assertTrue(MandatoryProtection.enforce(context))
+
+        val prefs = context.getSharedPreferences("security_prefs", Context.MODE_PRIVATE)
+        assertTrue(prefs.getBoolean(MandatoryProtection.KEY_BLOCK_TOR, false))
+        assertTrue(prefs.getBoolean(MandatoryProtection.KEY_BLOCK_TORRENTS, false))
     }
 
     @Test

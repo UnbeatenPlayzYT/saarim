@@ -10,9 +10,6 @@ import android.util.Log
 import androidx.core.content.edit
 import com.sarim.app.SarimApplication
 import com.sarim.app.models.AppItem
-import com.sarim.app.models.TimeLimit
-import com.sarim.app.models.TimeWindow
-import java.util.concurrent.TimeUnit
 
 object AppRepository {
     private const val HIDDEN_APPS_PREFS = "hidden_apps_prefs"
@@ -25,12 +22,6 @@ object AppRepository {
 
     private val hiddenAppsPrefs
         get() = context.getSharedPreferences(HIDDEN_APPS_PREFS, Context.MODE_PRIVATE)
-
-    private val dailyLimitsPrefs
-        get() = context.getSharedPreferences(AppTimeLimits.PREFS_NAME, Context.MODE_PRIVATE)
-
-    private val weeklyLimitsPrefs
-        get() = context.getSharedPreferences(AppTimeLimits.WEEKLY_PREFS_NAME, Context.MODE_PRIVATE)
 
     @Volatile
     private var cachedApps: List<AppItem>? = null
@@ -51,11 +42,7 @@ object AppRepository {
     }
 
     private fun loadAppsFromSystem(): List<AppItem> {
-        val limitsPrefs = dailyLimitsPrefs
-        val weeklyPrefs = weeklyLimitsPrefs
-        val reopenPrefs = context.getSharedPreferences("reopen_times", Context.MODE_PRIVATE)
         val ratingsPrefs = context.getSharedPreferences("app_ratings", Context.MODE_PRIVATE)
-        val timeWindowsPrefs = context.getSharedPreferences(AppTimeWindows.PREFS_NAME, Context.MODE_PRIVATE)
 
         val installedApps = packageManager.getInstalledApplications(PackageManager.MATCH_UNINSTALLED_PACKAGES)
 
@@ -76,9 +63,6 @@ object AppRepository {
                     isSystem = isSystem,
                     isHidden = isHidden,
                     isUninstallBlocked = isUninstallBlocked,
-                    timeLimit = AppTimeLimits.read(limitsPrefs, weeklyPrefs, packageName),
-                    reopeningSeconds = reopenPrefs.getInt(packageName, 0),
-                    timeWindows = AppTimeWindows.decode(timeWindowsPrefs.getString(packageName, null)),
                     isSuspended = isSuspended,
                     hasExplicitContent = ratingsPrefs.getBoolean(packageName, false)
                 )
@@ -151,37 +135,6 @@ object AppRepository {
     fun setUninstallBlocked(packageName: String, block: Boolean) {
         dpm.setUninstallBlocked(adminName, packageName, block)
         updateCachedApp(packageName) { it.copy(isUninstallBlocked = block) }
-    }
-
-    fun setAppTimeLimit(packageName: String, limit: TimeLimit) {
-        AppTimeLimits.write(dailyLimitsPrefs, weeklyLimitsPrefs, packageName, limit)
-        updateCachedApp(packageName) { it.copy(timeLimit = limit) }
-    }
-
-    fun getAppTimeLimits(): Map<String, TimeLimit> = AppTimeLimits.readAll(dailyLimitsPrefs, weeklyLimitsPrefs)
-
-    fun getAppUsage(packageName: String, inMinutes: Boolean = false): Long {
-        val used = context.getSharedPreferences("internal_usage_stats", Context.MODE_PRIVATE)
-            .getLong(packageName, 0L)
-        return if (inMinutes) TimeUnit.MILLISECONDS.toMinutes(used) else used
-    }
-
-    fun setAppReopenTime(packageName: String, seconds: Int) {
-        context.getSharedPreferences("reopen_times", Context.MODE_PRIVATE).edit {
-            if (seconds > 0) putInt(packageName, seconds) else remove(packageName)
-        }
-        updateCachedApp(packageName) { it.copy(reopeningSeconds = seconds) }
-    }
-
-    fun getAppReopenTime(packageName: String): Int {
-        return context.getSharedPreferences("reopen_times", Context.MODE_PRIVATE).getInt(packageName, 0)
-    }
-
-    fun setAppTimeWindows(packageName: String, windows: List<TimeWindow>) {
-        context.getSharedPreferences(AppTimeWindows.PREFS_NAME, Context.MODE_PRIVATE).edit {
-            if (windows.isEmpty()) remove(packageName) else putString(packageName, AppTimeWindows.encode(windows))
-        }
-        updateCachedApp(packageName) { it.copy(timeWindows = windows) }
     }
 
     fun getApplicationRestrictions(packageName: String): Bundle {

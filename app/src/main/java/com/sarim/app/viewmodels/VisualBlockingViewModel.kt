@@ -21,9 +21,6 @@ class VisualBlockingViewModel : ViewModel() {
     private val context = SarimApplication.getInstance()
     private val prefs = context.getSharedPreferences(VisualBlockingSettings.PREFS_NAME, Context.MODE_PRIVATE)
 
-    var enabled by mutableStateOf(prefs.getBoolean(VisualBlockingSettings.KEY_ENABLED, false))
-        private set
-
     var targetPackages by mutableStateOf(
         prefs.getStringSet(VisualBlockingSettings.KEY_TARGET_PACKAGES, VisualBlockingSettings.DEFAULT_TARGET_PACKAGES)
             ?: VisualBlockingSettings.DEFAULT_TARGET_PACKAGES
@@ -38,11 +35,6 @@ class VisualBlockingViewModel : ViewModel() {
 
     var threshold by mutableFloatStateOf(
         prefs.getFloat(VisualBlockingSettings.KEY_THRESHOLD, VisualBlockingSettings.DEFAULT_THRESHOLD)
-    )
-        private set
-
-    var suspendEnabled by mutableStateOf(
-        prefs.getBoolean(VisualBlockingSettings.KEY_SUSPEND_ENABLED, false)
     )
         private set
 
@@ -80,11 +72,6 @@ class VisualBlockingViewModel : ViewModel() {
         loadApps()
     }
 
-    fun updateEnabled(value: Boolean) {
-        enabled = value
-        prefs.edit { putBoolean(VisualBlockingSettings.KEY_ENABLED, value) }
-    }
-
     fun toggleAppSelection(packageName: String) {
         val newSet = targetPackages.toMutableSet()
         if (!newSet.remove(packageName)) newSet.add(packageName)
@@ -92,21 +79,9 @@ class VisualBlockingViewModel : ViewModel() {
         prefs.edit { putStringSet(VisualBlockingSettings.KEY_TARGET_PACKAGES, targetPackages) }
     }
 
-    fun toggleCategory(category: String) {
-        val newSet = selectedCategories.toMutableSet()
-        if (!newSet.remove(category)) newSet.add(category)
-        selectedCategories = newSet
-        prefs.edit { putStringSet(VisualBlockingSettings.KEY_CATEGORIES, selectedCategories) }
-    }
-
     fun updateThreshold(value: Float) {
         threshold = value
         prefs.edit { putFloat(VisualBlockingSettings.KEY_THRESHOLD, value) }
-    }
-
-    fun updateSuspendEnabled(value: Boolean) {
-        suspendEnabled = value
-        prefs.edit { putBoolean(VisualBlockingSettings.KEY_SUSPEND_ENABLED, value) }
     }
 
     /**

@@ -35,6 +35,11 @@ class StringsParityTest {
 
     @Test
     fun `the english file holds the full set, not a stub`() {
-        stringKeys("values").size shouldBe 551
+        // Guards against a truncated file: 318 keys is the whole UI of a porn-blocking app —
+        // focus mode, time limits, usage warnings, app groups, colour filters, impulse lock and
+        // the activity blocker were removed along with their strings. Raise this when adding
+        // strings; lower it only when a feature is deliberately removed, never to make a
+        // deletion pass green.
+        stringKeys("values").size shouldBe 318
     }
 }

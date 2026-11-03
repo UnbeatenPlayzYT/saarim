@@ -24,7 +24,7 @@ object VisualBlockingSettings {
     const val KEY_SUSPEND_DURATION_MINUTES = "suspend_duration_minutes"
 
     val DEFAULT_TARGET_PACKAGES: Set<String> = setOf("com.reddit.frontpage")
-    val DEFAULT_CATEGORIES: Set<String> = setOf("hentai", "porn", "sexy")
+    val DEFAULT_CATEGORIES: Set<String> = setOf("drawings", "hentai", "porn", "sexy")
     const val DEFAULT_THRESHOLD = 0.5f
     const val DEFAULT_SUSPEND_BLOCK_COUNT = 5
     const val DEFAULT_SUSPEND_WINDOW_MINUTES = 15

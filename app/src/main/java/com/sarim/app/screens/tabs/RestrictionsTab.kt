@@ -22,8 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sarim.app.R
 import com.sarim.app.screens.common.NoDeviceOwnerPrivileges
-import com.sarim.app.screens.common.RecoveryGateDialog
-import com.sarim.app.screens.common.rememberRecoveryGate
 import com.sarim.app.viewmodels.DeviceOwnerViewModel
 import com.sarim.app.viewmodels.NavigationViewModel
 import com.sarim.app.viewmodels.RestrictionsViewModel
@@ -34,8 +32,6 @@ fun RestrictionsTab(
     restrictionsViewModel: RestrictionsViewModel = viewModel(),
     navViewModel: NavigationViewModel = viewModel()
 ) {
-    val recoveryGate = rememberRecoveryGate()
-
     if (!deviceOwnerViewModel.isDeviceOwner()) {
         NoDeviceOwnerPrivileges(navViewModel)
     } else {
@@ -70,7 +66,7 @@ fun RestrictionsTab(
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
-                onClick = { recoveryGate.run { restrictionsViewModel.applyChanges() } },
+                onClick = { restrictionsViewModel.applyChanges() },
                 enabled = restrictionsViewModel.hasPendingChanges(),
                 shape = RoundedCornerShape(16.dp),
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
@@ -92,8 +88,6 @@ fun RestrictionsTab(
             }
         }
     }
-
-    RecoveryGateDialog(recoveryGate)
 }
 
 
@@ -184,6 +178,7 @@ private fun RestrictionAccordion(
                             value = key,
                             checked = viewModel.draftRestrictions[key] == true,
                             isApplied = viewModel.appliedRestrictions[key] == true,
+                            isMandatory = viewModel.isMandatory(key),
                             onCheckedChange = { viewModel.toggleDraft(key, it) }
                         )
                     }
@@ -199,18 +194,20 @@ fun RestrictionItem(
     value: String,
     checked: Boolean,
     isApplied: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    isMandatory: Boolean = false
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
+            .clickable(enabled = !isMandatory) { onCheckedChange(!checked) }
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange = onCheckedChange,
+            enabled = !isMandatory
         )
         Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
             Text(
@@ -223,7 +220,20 @@ fun RestrictionItem(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (isApplied) {
+        if (isMandatory) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.extraSmall,
+                modifier = Modifier.padding(start = 8.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.always_on),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        } else if (isApplied) {
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 shape = MaterialTheme.shapes.extraSmall,

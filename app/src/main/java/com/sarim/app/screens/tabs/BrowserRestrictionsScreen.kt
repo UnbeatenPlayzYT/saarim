@@ -26,22 +26,19 @@ import com.sarim.app.R
 import com.sarim.app.data.BrowserRestrictionsManager
 import com.sarim.app.screens.common.RecoveryGateDialog
 import com.sarim.app.screens.common.rememberRecoveryGate
-import com.sarim.app.models.AppItem
+import com.sarim.app.data.ProtectionDefaults
 import com.sarim.app.models.BlockedList
 import com.sarim.app.viewmodels.AppsViewModel
 import com.sarim.app.viewmodels.BrowserRestrictionsViewModel
-import com.sarim.app.viewmodels.DeviceOwnerViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BrowserRestrictionsScreen(
     viewModel: BrowserRestrictionsViewModel = viewModel(),
-    appsViewModel: AppsViewModel = viewModel(),
-    deviceOwnerViewModel: DeviceOwnerViewModel = viewModel()
+    appsViewModel: AppsViewModel = viewModel()
 ) {
     var showEditDialog by remember { mutableStateOf<BlockedList?>(null) }
     var isCreatingNew by remember { mutableStateOf(false) }
-    var showRestrictionsDialog by remember { mutableStateOf<AppItem?>(null) }
     val recoveryGate = rememberRecoveryGate()
     val context = LocalContext.current
 
@@ -64,9 +61,6 @@ fun BrowserRestrictionsScreen(
                             val manager = BrowserRestrictionsManager(context)
                             val notSupported = !manager.supportsRestrictions(browser.packageName)
                             ListItem(
-                                modifier = Modifier.clickable(enabled = !notSupported) {
-                                    showRestrictionsDialog = browser
-                                },
                                 headlineContent = { Text(browser.name) },
                                 supportingContent = {
                                     Column {
@@ -132,6 +126,7 @@ fun BrowserRestrictionsScreen(
             items(viewModel.blockedLists, key = { "url_${it.id}" }) { list ->
                 BlockedListAccordion(
                     list = list,
+                    mandatory = list.id == ProtectionDefaults.MANDATORY_BROWSER_LIST_ID,
                     onEdit = { 
                         isCreatingNew = false
                         showEditDialog = list 
@@ -144,27 +139,6 @@ fun BrowserRestrictionsScreen(
             }
 
         }
-    }
-
-    showRestrictionsDialog?.let { browser ->
-        AppRestrictionsDialog(
-            app = AppItem(
-                name = browser.name,
-                packageName = browser.packageName,
-                icon = browser.icon,
-                isSystem = false,
-                isHidden = false,
-                isUninstallBlocked = false
-            ),
-            viewModel = deviceOwnerViewModel,
-            onDismiss = { showRestrictionsDialog = null },
-            onSave = { restrictions ->
-                recoveryGate.run {
-                    deviceOwnerViewModel.setApplicationRestrictions(browser.packageName, restrictions)
-                }
-                showRestrictionsDialog = null
-            }
-        )
     }
 
     if (showEditDialog != null) {
@@ -227,6 +201,7 @@ fun BrowserRestrictionsScreen(
 @Composable
 fun BlockedListAccordion(
     list: BlockedList,
+    mandatory: Boolean,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -247,11 +222,19 @@ fun BlockedListAccordion(
                     Text(list.title, style = MaterialTheme.typography.titleMedium)
                     Text("${list.sites.size} sites", style = MaterialTheme.typography.labelSmall)
                 }
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, contentDescription = "")
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "")
+                if (mandatory) {
+                    Text(
+                        stringResource(R.string.always_on),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    IconButton(onClick = onEdit) {
+                        Icon(Icons.Default.Edit, contentDescription = "")
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(Icons.Default.Delete, contentDescription = "")
+                    }
                 }
                 Icon(
                     imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,

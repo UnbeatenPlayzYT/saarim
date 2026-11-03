@@ -22,6 +22,8 @@ class RestrictionsViewModel : ViewModel() {
 
     fun resourceNameFor(key: String): String? = SystemRestrictions.resourceNameFor(key)
 
+    fun isMandatory(key: String): Boolean = key in SystemRestrictions.mandatoryKeys
+
     init {
         loadRestrictions()
     }
@@ -37,18 +39,24 @@ class RestrictionsViewModel : ViewModel() {
     }
 
     fun toggleDraft(key: String, enabled: Boolean) {
+        // The mandatory restrictions are the bypass routes around the content filters; they can
+        // only ever be turned on.
+        if (key in SystemRestrictions.mandatoryKeys) {
+            draftRestrictions[key] = true
+            return
+        }
         draftRestrictions[key] = enabled
     }
 
     fun toggleAllDrafts(keys: List<String>, enabled: Boolean) {
         keys.forEach { key ->
-            draftRestrictions[key] = enabled
+            draftRestrictions[key] = if (key in SystemRestrictions.mandatoryKeys) true else enabled
         }
     }
 
     fun applyChanges() {
         allKeys.forEach { key ->
-            val shouldEnable = draftRestrictions[key] ?: false
+            val shouldEnable = key in SystemRestrictions.mandatoryKeys || draftRestrictions[key] == true
             val currentlyAppliedRestrictions = dpm.getUserRestrictions(adminName)
             if (shouldEnable) {
                 dpm.addUserRestriction(adminName, key as String?)

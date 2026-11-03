@@ -2,14 +2,12 @@ package com.sarim.app
 
 import android.app.Application
 import android.content.BroadcastReceiver
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.provider.Settings
 import com.sarim.app.data.AppRepository
-import com.sarim.app.data.ColorFilterController
-import com.sarim.app.data.FocusMode
+import com.sarim.app.security.CommitmentLock
+import com.sarim.app.security.MandatoryProtection
 import com.sarim.app.utils.LocaleUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,19 +57,10 @@ class SarimApplication : Application() {
             AppRepository.getApps()
         }
 
-        releaseOrphanedColorFilters()
-
-        // Catches up with a focus phase that ran out while the process was dead, and re-arms its alarm.
-        FocusMode.sync(this)
-    }
-
-    // A killed process skips the service's onUnbind, leaving the modes applied.
-    private fun releaseOrphanedColorFilters() {
-        if (!ColorFilterController.isApplied(this)) return
-        val service = ComponentName(this, SarimAccessibilityService::class.java)
-        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-            ?.split(':')
-            ?.any { ComponentName.unflattenFromString(it) == service } == true
-        if (!enabled) ColorFilterController.release(this)
+        // The whole protection stack — visual blocking, forbidden words, browser lists, filtering
+        // DNS, Tor/torrents and the system restrictions — is always on: this re-asserts it on
+        // every launch, including on a fresh install and after an upgrade.
+        applicationScope.launch { CommitmentLock.enforce(this@SarimApplication) }
+        applicationScope.launch { MandatoryProtection.enforce(this@SarimApplication) }
     }
 }
