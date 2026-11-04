@@ -45,7 +45,7 @@ blocking* already on.
 | `build` | `./gradlew :app:assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk` |
 | `install` | `waydroid app install app/build/outputs/apk/debug/app-debug.apk` |
 | `owner` | eligibility checks, then `sudo waydroid shell dpm set-device-owner com.sarim.app/.SarimDeviceAdminReceiver` |
-| `privileges` | `sudo waydroid shell`: `settings put secure enabled_accessibility_services com.sarim.app/.SarimAccessibilityService`, `settings put secure accessibility_enabled 1`, `pm grant … WRITE_SECURE_SETTINGS`, `pm grant … POST_NOTIFICATIONS` |
+| `privileges` | `sudo waydroid shell`: `settings put secure enabled_accessibility_services com.sarim.app/.SarimAccessibilityService`, `settings put secure accessibility_enabled 1`, `pm grant … WRITE_SECURE_SETTINGS` |
 | `launch` | `waydroid app launch com.sarim.app` |
 | `status` | `dpm list-owners`, the accessibility setting, and the app's version/permissions |
 
@@ -80,7 +80,7 @@ privilege — it detects the Device Owner state on its own.
 | `make install` | build, then install the APK |
 | `make launch` | start the app |
 | `make owner` | eligibility checks + `dpm set-device-owner` |
-| `make privileges` | accessibility service + `WRITE_SECURE_SETTINGS` + notifications |
+| `make privileges` | accessibility service + `WRITE_SECURE_SETTINGS` |
 | `make status` | owner registration, accessibility, app version and grants |
 | `make setup` | build, install, owner, privileges, launch, status |
 | `make deploy-waydroid` / `make deploy-adb` | `setup` pinned to that device |
@@ -104,9 +104,11 @@ The Makefile can grant the two system powers, not the parts that belong to you:
 
 1. **Recovery code wizard** — 16 characters. Write them on paper, type them back from the
    paper, store the paper somewhere hard to reach. There is no digital copy, and this code
-   is the only ordinary way to *weaken* the protection layers later — it is needed only on the
-   Screen time and Change recovery code screens. Every other setting is reachable in Settings
-   without it.
+   is the only ordinary way to *weaken* the protection layers later: it opens a 10-minute
+   session for the protection settings that are adjustable at all (monitored apps, word lists,
+   URL lists, the DNS host among the three, optional system restrictions, app blocking) and for
+   changing the code itself. Language, keyboard layout and the forced-removal timer never ask
+   for it.
 2. **Onboarding carousel** — the 5-slide tour appears once after the code is set.
 3. Walk the layers in [FEATURES.md §2](FEATURES.md) to exercise each protection.
 

@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -64,7 +65,11 @@ fun NsfwContentBlockedScreen(suspendedMinutes: Int = 0, onClose: () -> Unit) {
             Text(stringResource(R.string.nsfw_content_blocked), style = MaterialTheme.typography.headlineMedium)
             Text(
                 if (suspendedMinutes > 0)
-                    stringResource(R.string.nsfw_content_blocked_suspended, suspendedMinutes)
+                    pluralStringResource(
+                        R.plurals.nsfw_content_blocked_suspended,
+                        suspendedMinutes,
+                        suspendedMinutes
+                    )
                 else
                     stringResource(R.string.nsfw_content_blocked_description),
                 textAlign = TextAlign.Center,

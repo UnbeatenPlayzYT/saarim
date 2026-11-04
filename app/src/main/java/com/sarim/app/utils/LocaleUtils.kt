@@ -6,6 +6,7 @@ import android.content.res.Configuration
 import android.os.Build
 import android.os.LocaleList
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.content.edit
 import androidx.core.os.LocaleListCompat
 import java.util.Locale
 
@@ -22,7 +23,7 @@ object LocaleUtils {
 
     /** Applies the language chosen in Config → Language, and remembers it. */
     fun setLocale(context: Context, languageCode: String) {
-        prefs(context).edit().putString(KEY_LANGUAGE, languageCode).apply()
+        prefs(context).edit { putString(KEY_LANGUAGE, languageCode) }
         applyLocale(context, languageCode)
     }
 
@@ -40,7 +41,7 @@ object LocaleUtils {
         val language = system.ifEmpty { DEFAULT_LANGUAGE }
         // Committed, not applied: on API 33+ setting a locale can restart the process, and a
         // half-written preference would send the next launch through this branch again.
-        prefs.edit().putString(KEY_LANGUAGE, language).commit()
+        prefs.edit(commit = true) { putString(KEY_LANGUAGE, language) }
         if (language != system) applyLocale(context, language)
     }
 

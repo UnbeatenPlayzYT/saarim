@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">Sarim / صارم</string>
+    <string name="app_name">Sarim / صارم</string>
     <string name="attention">Attention!</string>
     <string name="recovery_wizard_step">Step %1$d of %2$d</string>
     <string name="recovery_wizard_next">Next</string>
@@ -260,14 +260,20 @@
 
     <string name="nsfw_content_blocked">Content blocked!</string>
     <string name="nsfw_content_blocked_description">Explicit content was detected on screen and blocked. Close the app and go do something else!</string>
-    <string name="nsfw_content_blocked_suspended">Explicit content was detected on screen once too often, so this app has been suspended for %1$d minutes. Go do something else!</string>
+    <plurals name="nsfw_content_blocked_suspended">
+        <item quantity="one">Explicit content was detected on screen once too often, so this app has been suspended for %1$d minute. Go do something else!</item>
+        <item quantity="other">Explicit content was detected on screen once too often, so this app has been suspended for %1$d minutes. Go do something else!</item>
+    </plurals>
 
     <string name="visual_blocking">Visual blocking</string>
     <string name="visual_blocking_explanation">This feature scans images, gifs and videos shown on screen in the selected apps using a machine learning model that runs entirely on your device — nothing is uploaded or sent anywhere. When content matching the selected categories is detected above the chosen sensitivity, the app is closed automatically.</string>
     <string name="visual_blocking_enable">Enable visual blocking</string>
     <string name="visual_blocking_requires_accessibility">Requires advanced blocking (accessibility service) to be enabled</string>
     <string name="visual_blocking_apps_section">Monitored apps</string>
-    <string name="visual_blocking_apps_selected">%1$d apps selected</string>
+    <plurals name="visual_blocking_apps_selected">
+        <item quantity="one">%1$d app selected</item>
+        <item quantity="other">%1$d apps selected</item>
+    </plurals>
     <string name="visual_blocking_categories_section">Categories to block</string>
     <string name="visual_blocking_categories_desc">Select which categories detected by the model should trigger blocking</string>
     <string name="visual_blocking_threshold_section">Sensitivity</string>
@@ -280,7 +286,10 @@
     <string name="visual_blocking_suspend_window_desc">Period the blocks have to happen within</string>
     <string name="visual_blocking_suspend_duration">Suspension time (minutes)</string>
     <string name="visual_blocking_suspend_duration_desc">How long the app stays suspended</string>
-    <string name="visual_blocking_suspend_summary">If the app is blocked %1$d times within %2$d minutes, it will be suspended for %3$d minutes and released automatically afterwards.</string>
+    <plurals name="visual_blocking_suspend_summary">
+        <item quantity="one">If the app is blocked %1$d time within %2$d minutes, it will be suspended for %3$d minutes and released automatically afterwards.</item>
+        <item quantity="other">If the app is blocked %1$d times within %2$d minutes, it will be suspended for %3$d minutes and released automatically afterwards.</item>
+    </plurals>
     <string name="nsfw_category_drawings">Drawings</string>
     <string name="nsfw_category_hentai">Hentai</string>
     <string name="nsfw_category_porn">Porn</string>
@@ -305,22 +314,23 @@
     <string name="onboarding_slide_4_cta">Set up now</string>
     <string name="onboarding_slide_4_note">Required for the system restrictions to apply.</string>
 
-    <plurals name="focus_apps_suspended">
-        <item quantity="one">%1$d app suspended until the break</item>
-        <item quantity="other">%1$d apps suspended until the break</item>
-    </plurals>
-
     <!-- Commitment -->
     <string name="commitment_setup_title">Set your commitment</string>
     <string name="commitment_setup_intro">Choose how long adult-content protection stays locked on. This is the first decision, made before any setting.</string>
-    <string name="commitment_duration_days">%1$d days</string>
+    <plurals name="commitment_duration_days">
+        <item quantity="one">%1$d day</item>
+        <item quantity="other">%1$d days</item>
+    </plurals>
     <string name="commitment_duration_permanent">Permanent</string>
     <string name="commitment_permanent_note">Never ends — the 48-hour forced removal is disabled</string>
     <string name="commitment_pins_title">What stays on for the whole period</string>
     <string name="commitment_pins_body">Visual blocking of adult images and video in every monitored app, the built-in forbidden words, adult-site blocking in every browser, forced SafeSearch, a family DNS resolver, Tor/Orbot and torrent blocking, and the device restrictions that stop a VPN, a sideloaded app, an uninstall or a clock change from getting around them.</string>
     <string name="commitment_acknowledge">I understand this cannot be cancelled, shortened or turned off — not with the recovery code, not from Android settings.</string>
     <string name="commitment_start_button">Start the commitment</string>
-    <string name="commitment_remaining_days">%1$d days left</string>
+    <plurals name="commitment_remaining_days">
+        <item quantity="one">%1$d day left</item>
+        <item quantity="other">%1$d days left</item>
+    </plurals>
     <string name="commitment_remaining_permanent">Permanent</string>
     <string name="commitment_active_title">Commitment active</string>
     <string name="commitment_pinned_desc">Adult-content protection is locked on for this period</string>

@@ -41,8 +41,8 @@ object PlayStoreRatingFetcher {
             if (raw.isBlank()) continue
             try {
                 val json = JSONObject(raw)
-                if (json.has("contentRating")) contentRating = json.optString("contentRating", null)
-                if (json.has("name")) title = json.optString("name", null)
+                if (json.has("contentRating")) contentRating = json.optString("contentRating").ifBlank { null }
+                if (json.has("name")) title = json.optString("name").ifBlank { null }
                 if (contentRating != null) break
             } catch (e: JSONException) {
                 continue

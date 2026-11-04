@@ -108,17 +108,16 @@ privileges: ## Enable the accessibility service and grant the system permissions
 	@$(DSH) sh -c 'settings put secure enabled_accessibility_services $(ACCESSIBILITY); \
 		settings put secure accessibility_enabled 1; \
 		pm grant $(APP_ID) android.permission.WRITE_SECURE_SETTINGS 2>/dev/null || true; \
-		pm grant $(APP_ID) android.permission.POST_NOTIFICATIONS 2>/dev/null || true; \
 		echo "== accessibility service =="; settings get secure enabled_accessibility_services; \
 		echo "== permissions granted =="; \
-		dumpsys package $(APP_ID) | grep -E "android.permission.(WRITE_SECURE_SETTINGS|POST_NOTIFICATIONS): granted=true"'
+		dumpsys package $(APP_ID) | grep -E "android.permission.WRITE_SECURE_SETTINGS: granted=true"'
 
 status: ## Show owner registration, accessibility and app state
 	@$(DSH) sh -c 'echo "== device owner =="; dpm list-owners 2>/dev/null; \
 		echo "== accessibility service =="; settings get secure enabled_accessibility_services; \
 		echo "== app =="; \
 		dumpsys package $(APP_ID) 2>/dev/null \
-			| grep -E "versionName|WRITE_SECURE_SETTINGS: granted|POST_NOTIFICATIONS: granted"'
+			| grep -E "versionName|WRITE_SECURE_SETTINGS: granted"'
 
 logcat: ## Follow Sarim's logs (debug builds log through Timber)
 	$(DSH) logcat -s Sarim

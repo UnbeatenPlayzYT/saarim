@@ -16,13 +16,19 @@ class StringsParityTest {
     private val locales =
         listOf("values" to "en", "values-ar" to "ar", "values-pt" to "pt")
 
-    private fun stringKeys(languageDir: String): Set<String> {
+    private fun keys(languageDir: String, tag: String): Set<String> {
         val file = File("src/main/res/$languageDir/strings.xml")
         if (!file.exists()) fail("missing strings file: ${file.path}")
         val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file)
-        val nodes = doc.getElementsByTagName("string")
-        return (0 until nodes.length).map { nodes.item(it).attributes.getNamedItem("name").nodeValue }.toSet()
+        val nodes = doc.getElementsByTagName(tag)
+        return (0 until nodes.length).map {
+            nodes.item(it).attributes.getNamedItem("name").nodeValue
+        }.toSet()
     }
+
+    private fun stringKeys(languageDir: String): Set<String> = keys(languageDir, "string")
+
+    private fun pluralKeys(languageDir: String): Set<String> = keys(languageDir, "plurals")
 
     @Test
     fun `en, ar and pt strings files hold the same keys`() {
@@ -34,12 +40,22 @@ class StringsParityTest {
     }
 
     @Test
+    fun `en, ar and pt files hold the same plurals`() {
+        val byLocale = locales.associate { (dir, code) -> code to pluralKeys(dir) }
+
+        val english = byLocale.getValue("en")
+        byLocale.getValue("ar") shouldBe english
+        byLocale.getValue("pt") shouldBe english
+    }
+
+    @Test
     fun `the english file holds the full set, not a stub`() {
-        // Guards against a truncated file: 318 keys is the whole UI of a porn-blocking app —
-        // focus mode, time limits, usage warnings, app groups, colour filters, impulse lock and
-        // the activity blocker were removed along with their strings. Raise this when adding
-        // strings; lower it only when a feature is deliberately removed, never to make a
-        // deletion pass green.
-        stringKeys("values").size shouldBe 318
+        // Counts every UI resource entry, strings and plurals together: a count message that
+        // becomes a plural keeps the total, so this still catches a truncated file. 318 is the
+        // whole UI of a porn-blocking app — focus mode, time limits, usage warnings, app groups,
+        // colour filters, impulse lock and the activity blocker were removed with their strings.
+        // Raise this when adding entries; lower it only when a feature is deliberately removed,
+        // never to make a deletion pass green.
+        (stringKeys("values").size + pluralKeys("values").size) shouldBe 318
     }
 }

@@ -8,19 +8,25 @@ for a period the user cannot shorten.
 
 This document describes the app as it is built: what each layer does, its defaults, what it
 needs, and exactly which actions are gated by the recovery code and which by the commitment.
-Each layer that does not touch adult-content protection no longer needs the recovery code
-to adjust it.
+Only settings that touch adult-content protection are gated; the rest are ordinary settings.
 
 ### The hardening-first design
 
-The app no longer asks for the recovery code for anything except the layer that actually keeps
-adult content out. Concretely:
+Everything that keeps adult content out is on by default; the recovery code decides only whether
+an *existing* protection may be tuned or weakened. Concretely:
 
-- **No secret code needed** — visual blocking, forbidden words, browser restrictions, private DNS,
-  system restrictions, app blocking/suspending, the accessibility goal, the DNS choice, the
-  built-in blocking, the commitment itself, language, keyboard layout and the forced-removal timer
-  are all reachable in Settings without the code. The code is only ever used on the Screen time
-  and Recovery code Change screens.
+- **No secret code needed** for settings that do not touch a protection layer: language, keyboard
+  layout, the onboarding carousel, and the forced-removal timer. They never open the code dialog.
+- **A 10-minute session unlocks the adjustable parts of the protection screens** — extra monitored
+  apps and the visual sensitivity (the built-in app and categories stay fixed), extra forbidden
+  words and per-app passive lists, extra URL lists and per-browser suspension, the DNS choice
+  among the three filtering resolvers, extra `UserManager` restrictions, app blocking/suspending/
+  uninstall lock, enabling advanced blocking, and changing the recovery code itself. The session is
+  opened by the dialog in `RecoveryGate` and is renewable; while it is active the dialog does not
+  reappear.
+- **The commitment overrides the session.** While a commitment is running, `RecoveryGate` refuses
+  every gated change, even with the code, except actions that only add protection
+  (`strengtheningAction = true`): enabling advanced blocking, blocking an app, suspending an app.
 - **Tor/Orbot and torrents are on by default and cannot be cancelled.** The toggles still render on
   the Config tab for visibility, but both return `true` from a no-setter getter and `enforce()`
   puts them back whenever they are out of line.
@@ -29,9 +35,8 @@ adult content out. Concretely:
   torrents, the developer/unsafe-source routes, and — on the adult side only — the commit lock
   itself once it is running.
 
-The recovery code is still the only ordinary way to *weaken* an adult-protection layer later, which
-is exactly what the code was added to guard. Everything else is now a settings change that the user
-can make directly.
+The recovery code is the only ordinary way to *weaken* an adult-protection layer later, which is
+exactly what the code was added to guard. It cannot shorten or end the commitment.
 
 ### What “default and not cancellable” means in the code
 
@@ -361,23 +366,39 @@ choice is made.
 
 ---
 
-## 7. What each layer does not gate
+## 7. What is gated and what is not
 
-The only screen that asks for the recovery code is **Screen time** (the challenge that opens before
-settings) and **Recovery code** (changing the code itself). Every other screen is a normal settings
-change the user can make directly — in particular:
+Gating is done by `screens/common/RecoveryGate.kt`. An action either opens the code dialog (when no
+session is active), runs through an active session, or never asks at all.
 
-- the visual-blocking monitored apps, categories and sensitivity;
-- the forbidden-words active list and per-app passive lists;
-- the browser list, per-browser suspension and extra URL lists;
-- the private-DNS choice among the three filtering resolvers;
-- the system restrictions list;
-- app blocking, suspending and the uninstall lock;
-- the accessibility goal and the DNS choice;
-- language and keyboard layout;
-- the forced-removal timer (when available).
+**Never asks for the code:**
 
-The code only protects the adult layers — which is why it exists.
+- language;
+- keyboard layout;
+- opening the onboarding carousel again;
+- the forced-removal timer (when the commitment is not permanent);
+- reading any screen, including the commitment, device-owner state and every current setting.
+
+**Asks once, then runs for 10 minutes (renewable):**
+
+- visual blocking: adding/removing monitored apps and changing the sensitivity; the built-in app
+  and the four adult categories cannot be changed at all;
+- forbidden words: the active list and the per-app passive lists, plus which apps are monitored;
+- browser restrictions: extra URL lists, attaching them to browsers, suspending a browser;
+- private DNS: switching among the three filtering resolvers;
+- system restrictions: adding or removing any optional `UserManager` policy;
+- apps screen: blocking/hiding, suspending and the uninstall lock;
+- advanced blocking: turning accessibility on (turning it off is refused by the commitment);
+- the recovery code itself (changing it needs the current one).
+
+**Refused even with an active session:** every one of the gated actions above while a commitment is
+running — except enabling advanced blocking, blocking an app and suspending an app, which only make
+the phone stricter. The dialog explains that the commitment is locked.
+
+The built-in layers (visual blocking itself, its categories, the forbidden-word seed list, the
+built-in adult-site list, SafeSearch, the DNS host being one of the three allowed ones, Tor and
+torrent blocking, and the eight mandatory restrictions) have no control at all, so no code can
+change them.
 
 ---
 

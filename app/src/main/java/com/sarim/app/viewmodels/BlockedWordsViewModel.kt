@@ -25,7 +25,9 @@ class BlockedWordsViewModel : ViewModel() {
     var blockedWordsText by mutableStateOf(prefs.getStringSet("blocked_words", emptySet())?.joinToString("\n") ?: "")
         private set
 
-    var targetPackages by mutableStateOf(prefs.getStringSet("target_packages", emptySet()) ?: emptySet())
+    var targetPackages by mutableStateOf<Set<String>>(
+        prefs.getStringSet("target_packages", emptySet()).orEmpty().toSet()
+    )
         private set
 
     var apps by mutableStateOf<List<AppItem>>(emptyList())

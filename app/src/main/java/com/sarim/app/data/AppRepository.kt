@@ -6,10 +6,10 @@ import android.content.RestrictionsManager
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.util.Log
 import androidx.core.content.edit
 import com.sarim.app.SarimApplication
 import com.sarim.app.models.AppItem
+import timber.log.Timber
 
 object AppRepository {
     private const val HIDDEN_APPS_PREFS = "hidden_apps_prefs"
@@ -89,7 +89,8 @@ object AppRepository {
         // (DevicePolicyManagerService double-checks isApplicationHidden() before
         // returning). Only persist the new state locally when it's true - otherwise
         // the cache/prefs would drift from reality and invert the next toggle.
-        Log.d("SarimPolicyUpdate", "setApplicationHidden request: package=$packageName hidden=$hidden accepted=$success")
+        Timber.tag("SarimPolicyUpdate")
+            .d("setApplicationHidden request: package=$packageName hidden=$hidden accepted=$success")
         if (!success) {
             invalidateCache()
             return
@@ -115,11 +116,11 @@ object AppRepository {
     fun reapplyHiddenIfNeeded(packageName: String) {
         val wasHidden = hiddenAppsPrefs.getStringSet(KEY_HIDDEN_PACKAGES, emptySet())
             ?.contains(packageName) == true
-        Log.d("SarimPolicyUpdate", "reapplyHiddenIfNeeded: package=$packageName wasHidden=$wasHidden")
+        Timber.tag("SarimPolicyUpdate").d("reapplyHiddenIfNeeded: package=$packageName wasHidden=$wasHidden")
         if (!wasHidden) return
 
         val success = dpm.setApplicationHidden(adminName, packageName, true)
-        Log.d("SarimPolicyUpdate", "reapplyHiddenIfNeeded request: package=$packageName accepted=$success")
+        Timber.tag("SarimPolicyUpdate").d("reapplyHiddenIfNeeded request: package=$packageName accepted=$success")
         if (success) {
             updateCachedApp(packageName) { it.copy(isHidden = true) }
         } else {

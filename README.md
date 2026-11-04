@@ -207,11 +207,12 @@ The Config tab offers a **forced removal** option as a deliberate last resort. I
 
 ## Privacy
 
-**Nothing leaves the device.** Sarim has no ads, no ad SDKs, no analytics, no crash-reporting SDK, and no telemetry. It makes no network calls of its own.
+**Your screen, your words and your settings never leave the device.** Sarim has no ads, no ad SDKs, no analytics, no crash-reporting SDK, and no telemetry.
 
 - The visual-blocking model (`nsfw_model.tflite`) runs entirely on-device. Screens are never captured to disk and never uploaded.
 - Word blocking, adult-site blocking, the classifier, the commitment and the recovery code all run and stay on the phone.
-- The only outside interaction is with [Shizuku](https://shizuku.rikka.app/), which is used locally to run the Device Owner setup commands. Shizuku runs on your device; it is not a server.
+- **The only outbound request** is the age-rating check: when an app is installed or first opened, Sarim downloads that app's public Play Store listing to see whether it is rated 18+ and flagged explicit. The package name is the only thing sent; nothing about you, your screen or your usage is included, and the result is cached on the device.
+- [Shizuku](https://shizuku.rikka.app/) is used locally to run the Device Owner setup commands. Shizuku runs on your device; it is not a server.
 - No account is required. No data is collected, sold or shared.
 
 The full text is in the [privacy policy](https://sarim.app/privacy).

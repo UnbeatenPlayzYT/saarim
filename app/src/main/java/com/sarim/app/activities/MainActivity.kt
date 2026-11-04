@@ -68,7 +68,7 @@ class MainActivity : LocalizedActivity() {
                 }
 
                 val currentScreen = navViewModel.selectedTab()
-                val isRoot = currentScreen in listOf("protection", "apps", "config")
+                val isRoot = currentScreen in NavigationViewModel.ROOT_SCREENS
 
                 BackHandler(enabled = !isRoot) {
                     navViewModel.goBack()
@@ -139,16 +139,20 @@ class MainActivity : LocalizedActivity() {
                         if (!SecurityManager.isRecoveryCodeSet(this) || !authenticated.value) return@Scaffold
 
                         val tabs = listOf(
-                            Triple("protection", R.string.protection, Icons.Outlined.Security),
-                            Triple("apps", R.string.apps, Icons.Filled.AppBlocking),
-                            Triple("config", R.string.config, Icons.Outlined.Settings)
+                            Triple(NavigationViewModel.SCREEN_PROTECTION, R.string.protection, Icons.Outlined.Security),
+                            Triple(NavigationViewModel.SCREEN_APPS, R.string.apps, Icons.Filled.AppBlocking),
+                            Triple(NavigationViewModel.SCREEN_CONFIG, R.string.config, Icons.Outlined.Settings)
                         )
 
                         val selectedBaseTab = when (currentScreen) {
-                            "apps" -> "apps"
-                            "config", "setup_device_owner", "system_restrictions",
-                            "browser_restrictions", "blocked_words", "visual_blocking" -> "config"
-                            else -> "protection"
+                            NavigationViewModel.SCREEN_APPS -> NavigationViewModel.SCREEN_APPS
+                            NavigationViewModel.SCREEN_CONFIG,
+                            NavigationViewModel.SCREEN_SETUP_DEVICE_OWNER,
+                            NavigationViewModel.SCREEN_SYSTEM_RESTRICTIONS,
+                            NavigationViewModel.SCREEN_BROWSER_RESTRICTIONS,
+                            NavigationViewModel.SCREEN_BLOCKED_WORDS,
+                            NavigationViewModel.SCREEN_VISUAL_BLOCKING -> NavigationViewModel.SCREEN_CONFIG
+                            else -> NavigationViewModel.SCREEN_PROTECTION
                         }
 
                         NavigationBar {
@@ -193,14 +197,15 @@ class MainActivity : LocalizedActivity() {
 
                         else -> Box(modifier = Modifier.padding(innerPadding)) {
                             when (currentScreen) {
-                                "protection" -> ProtectionTab()
-                                "apps" -> AppsTab()
-                                "config" -> ConfigTab()
-                                "setup_device_owner" -> SetupDeviceOwnerPrivileges()
-                                "system_restrictions" -> RestrictionsTab()
-                                "browser_restrictions" -> BrowserRestrictionsScreen()
-                                "blocked_words" -> BlockedWordsScreen()
-                                "visual_blocking" -> VisualBlockingScreen()
+                                NavigationViewModel.SCREEN_APPS -> AppsTab()
+                                NavigationViewModel.SCREEN_CONFIG -> ConfigTab()
+                                NavigationViewModel.SCREEN_SETUP_DEVICE_OWNER -> SetupDeviceOwnerPrivileges()
+                                NavigationViewModel.SCREEN_SYSTEM_RESTRICTIONS -> RestrictionsTab()
+                                NavigationViewModel.SCREEN_BROWSER_RESTRICTIONS -> BrowserRestrictionsScreen()
+                                NavigationViewModel.SCREEN_BLOCKED_WORDS -> BlockedWordsScreen()
+                                NavigationViewModel.SCREEN_VISUAL_BLOCKING -> VisualBlockingScreen()
+                                // Never render nothing: an unknown route falls back to the home tab.
+                                else -> ProtectionTab()
                             }
                         }
                     }

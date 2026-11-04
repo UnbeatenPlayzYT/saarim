@@ -2,16 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- PlayStoreRatingFetcher reads the store rating page to suspend 18+ apps. -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="ManifestOrder,PackageVisibilityPolicy,QueryAllPackagesPermission" />
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- PackageInstaller.uninstall: only used to undo an app installed through the APK updater. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <queries>
         <intent>
@@ -83,7 +82,8 @@
         <receiver
             android:name=".SarimPolicyUpdateReceiver"
             android:exported="true"
-            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            tools:targetApi="34">
             <intent-filter>
                 <action android:name="android.app.admin.action.DEVICE_POLICY_SET_RESULT" />
                 <action android:name="android.app.admin.action.DEVICE_POLICY_CHANGED" />

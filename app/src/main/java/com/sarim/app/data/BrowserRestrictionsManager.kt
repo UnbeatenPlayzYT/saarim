@@ -1,5 +1,6 @@
 package com.sarim.app.data
 
+import android.annotation.SuppressLint
 import android.content.RestrictionsManager
 import android.content.Context
 import android.content.Intent
@@ -51,6 +52,7 @@ class BrowserRestrictionsManager(private val context: Context) {
      * per package-added broadcast and whenever the "Block Torrent apps" toggle changes. Call
      * [invalidateTorrentCache] once the installed-app list may have changed.
      */
+    @SuppressLint("SdCardPath") // Probe-only path: the intent query only looks at the mime type.
     fun getPossibleTorrentApps(): Set<String> {
         cachedTorrentApps?.let { return it }
 
@@ -200,6 +202,13 @@ class BrowserRestrictionsManager(private val context: Context) {
      * is no longer a path that applies one without the other.
      */
     fun applyRestrictions() {
+        // Application restrictions are a device-owner policy: the DPM call throws a
+        // SecurityException for anyone else, and the mandatory enforcement runs on every launch —
+        // including the first one, before ownership has been granted. Skip until there is an
+        // owner; MandatoryProtection.enforce() runs again when the commitment starts, which is
+        // always after ownership, so the lists are applied as soon as they can be.
+        if (!DeviceAdmin.policyManager.isDeviceOwnerApp(context.packageName)) return
+
         val prefs = context.getSharedPreferences("browser_prefs", Context.MODE_PRIVATE)
         val json = prefs.getString("blocked_lists_json", null)
 

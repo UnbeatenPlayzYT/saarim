@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -96,7 +97,7 @@ fun SetupCommitment(paddingValues: PaddingValues, onStarted: () -> Unit) {
             Column(Modifier.padding(vertical = 8.dp)) {
                 CommitmentLock.DURATION_PRESETS_DAYS.forEach { days ->
                     DurationRow(
-                        label = stringResource(R.string.commitment_duration_days, days),
+                        label = pluralStringResource(R.plurals.commitment_duration_days, days, days),
                         selected = selectedDays == days,
                         onSelect = { selectedDays = days }
                     )

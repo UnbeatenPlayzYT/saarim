@@ -7,10 +7,10 @@ import android.app.admin.TargetUser
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import androidx.annotation.RequiresApi
 import com.sarim.app.data.AppRepository
 import com.sarim.app.data.DeviceAdmin
+import timber.log.Timber
 
 // Delivered on API 34+ (UPSIDE_DOWN_CAKE) with the result of a device-policy change. It is the
 // authoritative confirmation for the device-owner / managed-admin setup, so the setup UI waits on
@@ -51,8 +51,8 @@ class SarimPolicyUpdateReceiver : PolicyUpdateReceiver() {
         policyUpdateResult: PolicyUpdateResult
     ) {
         val packageName = additionalPolicyParams.getString(EXTRA_PACKAGE_NAME)
-        Log.d(
-            "SarimPolicyUpdate",
+        Timber.tag("SarimPolicyUpdate").d(
+            
             "$callback: policy=$policyIdentifier package=$packageName " +
                 "user=${describeTargetUser(targetUser)} result=${describeResult(policyUpdateResult)}"
         )

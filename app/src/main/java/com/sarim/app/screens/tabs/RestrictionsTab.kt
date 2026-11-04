@@ -1,5 +1,6 @@
 package com.sarim.app.screens.tabs
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -91,6 +92,9 @@ fun RestrictionsTab(
 }
 
 
+@SuppressLint("DiscouragedApi", "LocalContextResourcesRead")
+// The reflection into UserManager is the point of this screen: restrictions are listed by the
+// platform field names. The lookup is one-time per list, not a hot path.
 @Composable
 private fun RestrictionAccordion(
     title: String,
@@ -111,14 +115,16 @@ private fun RestrictionAccordion(
         }
     }
 
-    val filteredKeys = remember(keys, searchQuery, labelMap) {
-        if (searchQuery.isEmpty()) {
-            keys
-        } else {
-            keys.filter { key ->
-                val label = labelMap[key]?.let { context.getString(it) } ?: key
-                label.contains(searchQuery, ignoreCase = true) || key.contains(searchQuery, ignoreCase = true)
-            }
+    // Translations resolved during composition, so the search filter and the rows read the same
+    // labels without calling Context.getString from a remember block.
+    val labels = keys.associateWith { key -> labelMap[key]?.let { stringResource(it) } ?: key }
+
+    val filteredKeys = if (searchQuery.isEmpty()) {
+        keys
+    } else {
+        keys.filter { key ->
+            val label = labels[key] ?: key
+            label.contains(searchQuery, ignoreCase = true) || key.contains(searchQuery, ignoreCase = true)
         }
     }
 
@@ -174,7 +180,7 @@ private fun RestrictionAccordion(
 
                     filteredKeys.forEach { key ->
                         RestrictionItem(
-                            label = labelMap[key]?.let { stringResource(it) } ?: key,
+                            label = labels[key] ?: key,
                             value = key,
                             checked = viewModel.draftRestrictions[key] == true,
                             isApplied = viewModel.appliedRestrictions[key] == true,

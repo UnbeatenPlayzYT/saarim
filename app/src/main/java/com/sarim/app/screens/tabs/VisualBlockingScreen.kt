@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -74,10 +75,12 @@ fun VisualBlockingScreen(viewModel: VisualBlockingViewModel = viewModel()) {
             ListItem(
                 headlineContent = { Text(stringResource(R.string.visual_blocking_apps_section)) },
                 supportingContent = {
+                    val selectedCount = viewModel.targetPackages.size
                     Text(
-                        stringResource(
-                            R.string.visual_blocking_apps_selected,
-                            viewModel.targetPackages.size
+                        pluralStringResource(
+                            R.plurals.visual_blocking_apps_selected,
+                            selectedCount,
+                            selectedCount
                         )
                     )
                 },
@@ -197,8 +200,9 @@ fun VisualBlockingScreen(viewModel: VisualBlockingViewModel = viewModel()) {
                 onValueChange = { viewModel.updateSuspendDurationMinutes(it) }
             )
             Text(
-                stringResource(
-                    R.string.visual_blocking_suspend_summary,
+                pluralStringResource(
+                    R.plurals.visual_blocking_suspend_summary,
+                    viewModel.suspendBlockCount,
                     viewModel.suspendBlockCount,
                     viewModel.suspendWindowMinutes,
                     viewModel.suspendDurationMinutes

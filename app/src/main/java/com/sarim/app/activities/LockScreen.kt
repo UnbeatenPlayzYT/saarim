@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -64,6 +65,11 @@ fun LockScreen(onAuthenticated: () -> Unit) {
     var authError by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
+    // Hoisted so the biometric callbacks read Composition-provided strings instead of querying
+    // resources through the Context.
+    val biometricTitle = stringResource(R.string.biometric_title)
+    val biometricSubtitle = stringResource(R.string.biometric_subtitle)
+    val biometricError = stringResource(R.string.biometric_error)
     val commitmentRemaining = remember { CommitmentLock.remainingMillis(context) }
     val commitmentPermanent = remember { CommitmentLock.isPermanent(context) }
 
@@ -105,7 +111,7 @@ fun LockScreen(onAuthenticated: () -> Unit) {
             }
 
             override fun onAuthAttemptFailed() {
-                authError = context.getString(R.string.biometric_error)
+                authError = biometricError
             }
         }
     )
@@ -120,18 +126,18 @@ fun LockScreen(onAuthenticated: () -> Unit) {
         when {
             canUseBiometric -> {
                 val request = AuthenticationRequest.biometricRequest(
-                    title = context.getString(R.string.biometric_title)
+                    title = biometricTitle
                 ) {
-                    setSubtitle(context.getString(R.string.biometric_subtitle))
+                    setSubtitle(biometricSubtitle)
                 }
                 launcher.launch(request)
             }
 
             canUseDeviceCredential -> {
                 val request = AuthenticationRequest.credentialRequest(
-                    title = context.getString(R.string.biometric_title)
+                    title = biometricTitle
                 ) {
-                    setSubtitle(context.getString(R.string.biometric_subtitle))
+                    setSubtitle(biometricSubtitle)
                 }
                 launcher.launch(request)
             }
@@ -277,10 +283,8 @@ private fun CommitmentBanner(permanent: Boolean, remaining: Long) {
                 text = if (permanent || remaining == Long.MAX_VALUE) {
                     stringResource(R.string.commitment_remaining_permanent)
                 } else {
-                    stringResource(
-                        R.string.commitment_remaining_days,
-                        (remaining / (24L * 60L * 60L * 1000L)).toInt()
-                    )
+                    val daysLeft = (remaining / (24L * 60L * 60L * 1000L)).toInt()
+                    pluralStringResource(R.plurals.commitment_remaining_days, daysLeft, daysLeft)
                 },
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold

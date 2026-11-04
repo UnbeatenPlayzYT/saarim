@@ -355,7 +355,12 @@ class SarimAccessibilityService : AccessibilityService() {
             addAction(Intent.ACTION_PACKAGE_ADDED)
             addDataScheme("package")
         }
-        registerReceiver(packageReceiver, packageFilter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(packageReceiver, packageFilter, RECEIVER_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(packageReceiver, packageFilter)
+        }
 
         if (BuildConfig.DEBUG) {
             val filter = IntentFilter("com.sarim.app.DEBUG_INSTALL")

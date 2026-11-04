@@ -6,12 +6,12 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.util.Log
 import androidx.core.content.edit
 import androidx.core.net.toUri
 import com.sarim.app.SarimApplication
 import com.sarim.app.utils.ShizukuRunner
 import rikka.shizuku.Shizuku
+import timber.log.Timber
 
 /** Device-owner setup/state: Shizuku shell commands plus the [DevicePolicyManager] calls they unlock. */
 object DeviceOwnerRepository {
@@ -81,7 +81,7 @@ object DeviceOwnerRepository {
             }
             if (!lastShown) {
                 lastShown = true
-                Log.d("DeviceOwnerRepo", "waiting for admin result")
+                Timber.tag("DeviceOwnerRepo").d("waiting for admin result")
             }
             Thread.sleep(ADMIN_RESULT_POLL_MS)
         }
@@ -115,7 +115,7 @@ object DeviceOwnerRepository {
                         println("Output: $output Done: $done")
                     }
                     override fun onCommandError(error: String) {
-                        Log.e("Shizuku", error)
+                        Timber.tag("Shizuku").e(error)
                     }
                 })
 
@@ -168,12 +168,12 @@ object DeviceOwnerRepository {
                         println("Output: \n$output")
                     }
                     override fun onCommandError(error: String) {
-                        Log.e("Shizuku", error)
+                        Timber.tag("Shizuku").e(error)
                     }
                 })
 
         } catch (e: Exception) {
-            Log.e("ShizukuError", "Erro ao buscar contas", e)
+            Timber.tag("ShizukuError").e(e, "Erro ao buscar contas")
         }
         return accounts
     }
@@ -210,7 +210,7 @@ object DeviceOwnerRepository {
                     }
 
                     override fun onCommandError(error: String) {
-                        Log.e("Shizuku", error)
+                        Timber.tag("Shizuku").e(error)
                     }
                 })
             val componentPath = dpmOutput
@@ -255,7 +255,7 @@ object DeviceOwnerRepository {
                 }
 
                 override fun onCommandError(error: String) {
-                    Log.e("Shizuku", error)
+                    Timber.tag("Shizuku").e(error)
                 }
             })
 
@@ -273,7 +273,7 @@ object DeviceOwnerRepository {
                 }
 
                 override fun onCommandError(error: String) {
-                    Log.e("Shizuku", error)
+                    Timber.tag("Shizuku").e(error)
                 }
             })
         return services.replace("\n", "")
@@ -304,7 +304,7 @@ object DeviceOwnerRepository {
                 }
 
                 override fun onCommandError(error: String) {
-                    Log.e("Shizuku", error)
+                    Timber.tag("Shizuku").e(error)
                 }
             })
 
@@ -316,7 +316,7 @@ object DeviceOwnerRepository {
                 }
 
                 override fun onCommandError(error: String) {
-                    Log.e("Shizuku", error)
+                    Timber.tag("Shizuku").e(error)
                 }
             })
 

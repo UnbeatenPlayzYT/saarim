@@ -1,12 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Sarim only uses the Device Owner / restrictions API (UserManager restrictions, package
+    suspension, managed configurations, private DNS). It never locks the screen, resets the
+    password or wipes data, so no legacy admin policies are declared here.
+-->
 <device-admin>
-    <uses-policies>
-        <limit-password />
-        <watch-login />
-        <reset-password />
-        <force-lock />
-        <wipe-data />
-        <expire-password />
-        <disable-keyguard-features />
-    </uses-policies>
+    <uses-policies />
 </device-admin>

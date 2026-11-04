@@ -411,6 +411,8 @@ private fun StoreStep(
     onStoredChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    val shareMessage = stringResource(R.string.partner_share_message, code)
+    val shareChooserTitle = stringResource(R.string.partner_share_chooser)
 
     StepHeader(
         icon = Icons.Outlined.Inventory2,
@@ -436,9 +438,9 @@ private fun StoreStep(
         onClick = {
             val share = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, context.getString(R.string.partner_share_message, code))
+                putExtra(Intent.EXTRA_TEXT, shareMessage)
             }
-            val chooser = Intent.createChooser(share, context.getString(R.string.partner_share_chooser))
+            val chooser = Intent.createChooser(share, shareChooserTitle)
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             runCatching { context.startActivity(chooser) }
         },

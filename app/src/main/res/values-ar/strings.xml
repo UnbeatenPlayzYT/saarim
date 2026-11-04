@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">Sarim / صارم</string>
+    <string name="app_name">Sarim / صارم</string>
     <string name="attention">انتبه!</string>
     <string name="recovery_wizard_step">الخطوة %1$d من %2$d</string>
     <string name="recovery_wizard_next">التالي</string>
@@ -277,14 +277,28 @@
 
     <string name="nsfw_content_blocked">تم حجب المحتوى!</string>
     <string name="nsfw_content_blocked_description">تم اكتشاف محتوى صريح على الشاشة وحُجب. أغلق التطبيق وابدأ شيئًا آخر!</string>
-    <string name="nsfw_content_blocked_suspended">تم اكتشاف محتوى صريح على الشاشة مرةً كثيرة جدًا، لذا تم تعليق هذا التطبيق لمدة %1$d دقيقة. افعل شيئًا آخر!</string>
+    <plurals name="nsfw_content_blocked_suspended">
+        <item quantity="zero">تم اكتشاف محتوى صريح على الشاشة مرةً كثيرة جدًا، لذا تم تعليق هذا التطبيق لمدة %1$d دقيقة. افعل شيئًا آخر!</item>
+        <item quantity="one">تم اكتشاف محتوى صريح على الشاشة مرةً كثيرة جدًا، لذا تم تعليق هذا التطبيق لمدة دقيقة واحدة. افعل شيئًا آخر!</item>
+        <item quantity="two">تم اكتشاف محتوى صريح على الشاشة مرةً كثيرة جدًا، لذا تم تعليق هذا التطبيق لمدة دقيقتين. افعل شيئًا آخر!</item>
+        <item quantity="few">تم اكتشاف محتوى صريح على الشاشة مرةً كثيرة جدًا، لذا تم تعليق هذا التطبيق لمدة %1$d دقائق. افعل شيئًا آخر!</item>
+        <item quantity="many">تم اكتشاف محتوى صريح على الشاشة مرةً كثيرة جدًا، لذا تم تعليق هذا التطبيق لمدة %1$d دقيقة. افعل شيئًا آخر!</item>
+        <item quantity="other">تم اكتشاف محتوى صريح على الشاشة مرةً كثيرة جدًا، لذا تم تعليق هذا التطبيق لمدة %1$d دقيقة. افعل شيئًا آخر!</item>
+    </plurals>
 
     <string name="visual_blocking">الحجب البصري</string>
     <string name="visual_blocking_explanation">هذه الميزة تفحص الصور وGIFs والمقاطع المرئية المعروضة على الشاشة في التطبيقات المختارة باستخدام نموذج تعلم آلي يعمل بالكامل على جهازك — لا شيء يُرسل أو يرفع إلى أي مكان. عند اكتشاف محتوى يطابق الفئات المختارة فوق حد الحساسية المختار، يُغلق التطبيق تلقائيًا.</string>
     <string name="visual_blocking_enable">تفعيل الحجب البصري</string>
     <string name="visual_blocking_requires_accessibility">يتطلب الحجب المتقدم (خدمة الوصول إلى الشاشة) أن يكون مفعَّلًا</string>
     <string name="visual_blocking_apps_section">التطبيقات المراقبة</string>
-    <string name="visual_blocking_apps_selected">%1$d تطبيقات مختارة</string>
+    <plurals name="visual_blocking_apps_selected">
+        <item quantity="zero">لا تطبيقات مختارة</item>
+        <item quantity="one">تطبيق واحد مختار</item>
+        <item quantity="two">تطبيقان مختاران</item>
+        <item quantity="few">%1$d تطبيقات مختارة</item>
+        <item quantity="many">%1$d تطبيقًا مختارًا</item>
+        <item quantity="other">%1$d تطبيق مختار</item>
+    </plurals>
     <string name="visual_blocking_categories_section">الفئات التي يتم حجبها</string>
     <string name="visual_blocking_categories_desc">اختر الفئات التي يكتشفها النموذج لتُحفّز الحجب</string>
     <string name="visual_blocking_threshold_section">الحساسية</string>
@@ -297,28 +311,44 @@
     <string name="visual_blocking_suspend_window_desc">الفترة التي يجب أن تحدث فيها الحجبات</string>
     <string name="visual_blocking_suspend_duration">مدة التعليق (دقائق)</string>
     <string name="visual_blocking_suspend_duration_desc">كم يبقى التطبيق معلّقًا</string>
-    <string name="visual_blocking_suspend_summary">إذا حُجب التطبيق %1$d مرة خلال %2$d دقيقة، سيُعلّق لمدة %3$d دقيقة ويُطلق تلقائيًا بعدها.</string>
+    <plurals name="visual_blocking_suspend_summary">
+        <item quantity="zero">إذا حُجب التطبيق %1$d مرة خلال %2$d دقيقة، سيُعلّق لمدة %3$d دقيقة ويُطلق تلقائيًا بعدها.</item>
+        <item quantity="one">إذا حُجب التطبيق مرة واحدة خلال %2$d دقيقة، سيُعلّق لمدة %3$d دقيقة ويُطلق تلقائيًا بعدها.</item>
+        <item quantity="two">إذا حُجب التطبيق مرتين خلال %2$d دقيقة، سيُعلّق لمدة %3$d دقيقة ويُطلق تلقائيًا بعدها.</item>
+        <item quantity="few">إذا حُجب التطبيق %1$d مرات خلال %2$d دقيقة، سيُعلّق لمدة %3$d دقيقة ويُطلق تلقائيًا بعدها.</item>
+        <item quantity="many">إذا حُجب التطبيق %1$d مرة خلال %2$d دقيقة، سيُعلّق لمدة %3$d دقيقة ويُطلق تلقائيًا بعدها.</item>
+        <item quantity="other">إذا حُجب التطبيق %1$d مرة خلال %2$d دقيقة، سيُعلّق لمدة %3$d دقيقة ويُطلق تلقائيًا بعدها.</item>
+    </plurals>
     <string name="nsfw_category_drawings">رسومات</string>
     <string name="nsfw_category_hentai">هنتاي</string>
     <string name="nsfw_category_porn">إباحي</string>
     <string name="nsfw_category_sexy">جذاب / suggestive</string>
 
-    <plurals name="focus_apps_suspended">
-        <item quantity="one">%1$d تطبيق مُعلّق حتى الاستراحة</item>
-        <item quantity="other">%1$d تطبيق مُعلّق حتى الاستراحة</item>
-    </plurals>
-
     <!-- Commitment -->
     <string name="commitment_setup_title">حدّد التزامك</string>
     <string name="commitment_setup_intro">اختر المدة التي تبقى فيها الحماية من المحتوى الإباحي مقفلة. هذا أول قرار، قبل أي إعداد.</string>
-    <string name="commitment_duration_days">%1$d يومًا</string>
+    <plurals name="commitment_duration_days">
+        <item quantity="zero">لا أيام</item>
+        <item quantity="one">يوم واحد</item>
+        <item quantity="two">يومان</item>
+        <item quantity="few">%1$d أيام</item>
+        <item quantity="many">%1$d يومًا</item>
+        <item quantity="other">%1$d يوم</item>
+    </plurals>
     <string name="commitment_duration_permanent">دائم</string>
     <string name="commitment_permanent_note">لا ينتهي أبدًا — تُعطَّل الإزالة القسرية بعد 48 ساعة</string>
     <string name="commitment_pins_title">ما يبقى مفعّلًا طوال المدة</string>
     <string name="commitment_pins_body">الحجب البصري للصور والفيديوهات الإباحية في كل تطبيق مراقب، والكلمات المحظورة المدمجة، وحجب المواقع الإباحية في كل متصفح، وتفعيل البحث الآمن إجباريًا، وخادم DNS عائلي، وحجب Tor/Orbot والتورنت، وقيود الجهاز التي تمنع الالتفاف عليها عبر VPN أو تطبيق مثبّت من الخارج أو إزالة التطبيق أو تغيير الساعة.</string>
     <string name="commitment_acknowledge">أفهم أن هذا لا يمكن إلغاؤه أو تقصيره أو إيقافه — لا برمز الاسترداد ولا من إعدادات أندرويد.</string>
     <string name="commitment_start_button">ابدأ الالتزام</string>
-    <string name="commitment_remaining_days">بقي %1$d يومًا</string>
+    <plurals name="commitment_remaining_days">
+        <item quantity="zero">بقي 0 يوم</item>
+        <item quantity="one">بقي يوم واحد</item>
+        <item quantity="two">بقي يومان</item>
+        <item quantity="few">بقي %1$d أيام</item>
+        <item quantity="many">بقي %1$d يومًا</item>
+        <item quantity="other">بقي %1$d يوم</item>
+    </plurals>
     <string name="commitment_remaining_permanent">دائم</string>
     <string name="commitment_active_title">الالتزام ساري</string>
     <string name="commitment_pinned_desc">الحماية من المحتوى الإباحي مقفلة لهذه المدة</string>

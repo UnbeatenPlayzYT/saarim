@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -213,10 +214,10 @@ private fun CommitmentCard(permanent: Boolean, remaining: Long, started: Boolean
                 text = when {
                     !started -> stringResource(R.string.commitment_setup_title)
                     permanent -> stringResource(R.string.commitment_remaining_permanent)
-                    active -> stringResource(
-                        R.string.commitment_remaining_days,
-                        (remaining / (24L * 60L * 60L * 1000L)).toInt()
-                    )
+                    active -> {
+                        val daysLeft = (remaining / (24L * 60L * 60L * 1000L)).toInt()
+                        pluralStringResource(R.plurals.commitment_remaining_days, daysLeft, daysLeft)
+                    }
                     else -> stringResource(R.string.commitment_ended)
                 },
                 style = MaterialTheme.typography.headlineMedium,
