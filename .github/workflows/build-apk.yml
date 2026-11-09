@@ -1,0 +1,88 @@
+name: Build APK
+
+# Builds the Sarim APK on GitHub's servers.
+# Run it: Actions tab -> "Build APK" -> "Run workflow". It also runs on every push to main.
+# Download: open the finished run -> "Artifacts" section at the bottom.
+#
+# Optional, for a signed release APK (recommended if you'll install updates later —
+# debug builds from different runs can have different keys, so Android may refuse to
+# update over an older install). Add these repository secrets
+# (Settings -> Secrets and variables -> Actions):
+#   KEYSTORE_BASE64   base64 of your .jks file   (base64 -w0 my.jks)
+#   KEYSTORE_PASSWORD
+#   KEY_ALIAS
+#   KEY_PASSWORD
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # The default list includes the retired 'tools' package, which no longer exists.
+          packages: 'platform-tools'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Remove machine-specific Java path
+        # The upstream gradle.properties pins org.gradle.java.home to a path on the author's PC.
+        run: sed -i '/^org.gradle.java.home=/d' gradle.properties
+
+      - name: Configure release signing (only if secrets are set)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            {
+              echo "dechainer.storeFile=$RUNNER_TEMP/release.jks"
+              echo "dechainer.storePassword=$KEYSTORE_PASSWORD"
+              echo "dechainer.keyAlias=$KEY_ALIAS"
+              echo "dechainer.keyPassword=$KEY_PASSWORD"
+            } >> local.properties
+            echo "SIGNED=true" >> "$GITHUB_ENV"
+          else
+            echo "No signing secrets: building debug APK only."
+          fi
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Build signed release APK
+        if: env.SIGNED == 'true'
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarim-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+
+      - name: Upload release APK
+        if: env.SIGNED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarim-release-apk
+          path: app/build/outputs/apk/release/*.apk
